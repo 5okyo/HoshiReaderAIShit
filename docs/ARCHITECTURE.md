@@ -260,6 +260,9 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   after exact size and SHA-256 verification followed by an atomic move. These
   short user-visible transfers use cancellable in-process coroutines rather
   than WorkManager.
+  Catalog grouping uses the publisher's specific style classification, including
+  Google Fonts style tags: Rounded fonts belong in the rounded group even when
+  their broad Google Fonts metadata category is `SANS_SERIF`.
 - Reader and lookup WebViews consume stable per-family CSS aliases and render
   specs containing installed faces, real weight/style values, variable axes,
   and the font-library revision. Generic system serif/sans-serif choices remain

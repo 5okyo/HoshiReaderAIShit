@@ -6,6 +6,15 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ## [Unreleased]
 
+### Added
+
+- Add LINE Seed JP to the rounded recommended reader fonts, with Thin, Regular, Bold,
+  and ExtraBold variants.
+
+### Changed
+
+- Replace BIZ UDPGothic with BIZ UDGothic in the recommended reader fonts.
+
 ## [v1.4.0] - 2026-09-24
 
 ### Added
