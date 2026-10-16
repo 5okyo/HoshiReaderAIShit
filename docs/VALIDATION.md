@@ -54,6 +54,11 @@ For a single JVM unit test, do not use `./gradlew test --tests ...`; the
 ./gradlew :app:testDebugUnitTest --tests fully.qualified.TestClassName.testMethodName
 ```
 
+MockWebServer WebSocket fixtures must reply to peer closure in `onClosing` with
+`webSocket.close(code, reason)`. Otherwise server shutdown can wait indefinitely
+for the close handshake and fail the test during teardown. Do not suppress shutdown
+exceptions or treat a successful rerun as a fix.
+
 For localization changes, run:
 
 ```bash
@@ -86,6 +91,8 @@ node --test app/src/test/js/*.test.mjs
 ## Device And Emulator Safety
 
 - Preserve app data by default.
+- Device UI tests resolve control labels from the target app's localized resources;
+  do not assume English or change the user's device/app language for a fixture.
 - `am instrument` can exit with shell status 0 despite failing tests. Require its
   final `OK (N tests)` summary; inspect `FAILURES`, `INSTRUMENTATION_FAILED`, and
   test stack traces before reporting a device run as passed.
@@ -353,12 +360,23 @@ Manual reader validation should cover:
   absence of invisible touch blockers after dismissal.
 - volume-key popup term navigation in paginated, continuous, and VN modes:
   verify the root or topmost recursive popup takes priority over enabled page
-  turns and Sasayaki seeking, default and reversed directions reach adjacent
+  turns and Sasayaki/TTS seeking, default and reversed directions reach adjacent
   term headers aligned exactly to the popup top without wrapping; repeat at
   popup scales 0.8, 1.0, 1.5, and 2.0. Verify long-press repeats work while
   asynchronously rendered terms appear, manual scrolling resumes from the
   visible term, and closing the popup restores the previously configured
   volume-key behavior.
+- The shared Volume Keys Control Audiobook / TTS switch defaults off and retains the
+  existing Sasayaki preference. Enable it with page turns and popup-term navigation:
+  before starting book narration (including after preview-only playback), volume keys retain
+  their existing page/system behavior. After explicit TTS playback, they navigate previous/next
+  sentences while playing or paused, below topmost popup terms and above page turns. Check
+  both directions, reversal, long-press repeat and key-up consumption. Closing/reopening or
+  switching books resets eligibility; rotation retains the current session. Audiobook association
+  leaves its existing Sasayaki priority intact. Pause, jump across a chapter boundary, and verify
+  the sentence is revealed without audio; explicit resume starts the selected sentence. Passive
+  paused chapter navigation must still stay where the user browses. Check sheet, reader toolbar
+  and headset/notification previous/next preserve pause, while explicit replay/start-at can play.
 - E-ink selection marks, horizontal and vertical lookup underlines, reduced
   motion popup scrolling, and slow-device first-visible-content behavior.
 - reader chrome behavior: focus mode, transient system bars, Android Back
@@ -1038,3 +1056,399 @@ Validate relevant sync/update/Sasayaki changes with:
   Media3 lifecycle regression until the same flow is reproduced with the app
   allowed to run in the background. Record both restriction states in manual QA
   notes.
+
+## Japanese TTS
+
+- `TtsRepositoryTest` verifies active/inactive voices, source rates, dialogue
+  choices, credentials and WAV/MP3 selection through edit/reload. Deferred independent
+  setting edits must preserve newer credentials and behavior settings. Switching sources
+  retains the existing shared rate behavior for installed/built-in engines and independent
+  rates for custom servers.
+- Change extra sentence pause while narration is playing: keep the current sentence and
+  cached audio, and apply the new delay at the next sentence boundary. It must not pause,
+  restart synthesis or resume previously paused playback. Controller/audio repository
+  tests cover this separately from provider-side synthesis silence parameters.
+
+- Narration/dialogue routing: run `TtsDialogueTest`, `TtsCustomDialogueTest`,
+  `TtsRepositoryTest`, `TtsAudioRepositoryTest`, `TtsPlaybackControllerTest` and
+  `TtsExportTest` in the JVM suite. Cover paired/nested/unmatched Japanese quotes,
+  cross-sentence/paragraph dialogue and chapter reset; ruby and sentence-end image
+  glyphs, symbols/emoji and replacements across role boundaries; source-anchored lookup
+  with repeated text; first activation after choosing a voice while disabled, retained
+  dialogue after reactivation and per-Source restart restoration; ordered request-local
+  voices, identical-voice coalescing, invalid voices, partial synthesis cleanup/retry,
+  cache separation and inactive-source edits/late callbacks. Compatible exports keep
+  MP3/WAV; incompatible formats use M4A, while corrupt input still fails and cancellation
+  deletes partial exports. Prefetch/cache counts remain sentences, not voice fragments.
+  On a connected device, explicitly run `TtsDialogueUiTest` and
+  `TtsDialogueExportDeviceTest` using the APK-preserving installation procedure below.
+  The UI fixture covers ordinary/e-ink selection, refresh, initial/re-enabled routing
+  and the fixed Preview footer. Local PCM fixtures verify the real AAC codec with
+  different sample rates/channel counts and full sentence duration, without credentials.
+  Also check installed-engine dual voices and reading/replacement preview/Anki in
+  paginated, continuous and VN modes, paused navigation, images and background controls.
+  Build success alone does not establish device UI or codec validation.
+- Online-source regressions: run `OnlineTtsProtocolTest`, `OnlineTtsTransportTest`,
+  `OnlineTtsEngineTest`, `MicrosoftTranslatorSessionTest` and `TtsMp3Test` with the JVM
+  suite. Cover literal SSML/JSON,
+  UTF-8/surrogate-safe chunking, credential headers, provider errors, cancellation,
+  complete WebSocket turns, partial-file cleanup, MP3 frame concatenation, supported
+  styles/roles and synthesis parameters. Translator coverage includes signing vectors,
+  concurrent/expiry token refresh, bounded authentication retry, malformed responses
+  and canceled authorization. Keep live network calls out of JVM tests.
+- With a connected non-disposable device, build the test APK with
+  `:app:assembleDebugAndroidTest`, install APKs via `adb install -r`, and explicitly run
+  `OnlineTtsDeviceTest` through `am instrument`. It uses public Japanese samples,
+  test-owned cache and encrypted test values, without changing saved settings. Require
+  the final `OK` summary. Verify Edge, Google Translate and Microsoft Translator MP3
+  exports with MediaExtractor,
+  including multi-part sentences; verify source-bound Keystore credential round trips.
+  Translator tests also verify an advertised speaking style with pitch/rate/punctuation
+  controls, 16 kHz PCM and 48 kHz MP3 exports, without reading saved Azure credentials.
+  Run `TtsContinuousPlaybackDeviceTest` for high-rate Edge playback through the real
+  controller, audio repository and Media3 decoder. It uses public sentences, an isolated
+  player/cache and in-memory preferences, and must complete every sentence without
+  changing the installed user's source, credentials or book data.
+- Azure/Google Cloud live verification requires the user's configured account. Check
+  missing/invalid credentials, 429/quota and offline errors, draft test/cancel/save,
+  Japanese catalogs, WAV/MP3 exports, and supported parameters. Never claim mocked
+  response coverage as a successful live account test. Reopening configuration must
+  keep the saved key masked; leaving it empty preserves it. An unavailable
+  Keystore key must report a configuration error.
+  Azure's region dropdown starts at Choose a region and never preselects the first item.
+  Verify compact rows displaying only region codes, scrolling to the end of the list, valid
+  saved selection on reopen. Save/Test
+  require a supported selection; changing it clears previous verification. Cancel leaves
+  the saved region unchanged. `TtsProviderConfigurationTest` and `TtsPanelStateTest`
+  cover UI drafts and ViewModel validation with isolated preferences.
+  Delete key appears only for saved cloud credentials and requires confirmation. Cancel
+  preserves the key; confirm deletes it immediately without Save, retaining region and
+  other preferences and clearing the input/test feedback. A write failure retains the key
+  and draft and permits retry. Subsequent blank Save/Test must report missing credentials
+  rather than restoring or using the removed key. `TtsProviderConfigurationTest`,
+  `TtsPanelStateTest` and `TtsRepositoryTest` cover these paths with isolated settings.
+- Compare default/modified pitch and volume in preview and Anki. Azure/Translator style/role choices
+  must come from the selected voice, reset when changing voices, and include only valid
+  styles. Test exact leading/trailing/punctuation silence, including zero vs voice default.
+  Verify normal provider pause sliders span 0–1000 ms and extra sentence delay spans
+  0–2000 ms, both allowing 300 → 310 ms. Run
+  `TtsPauseControlsTest` explicitly with `am instrument`; it uses isolated Compose
+  controls and in-memory preferences without network requests or saved-device changes.
+  Google Translate's engine rate offers normal/slow only. Unsupported pitch controls must be hidden.
+- Hoshi playback speed is independent of engine rate, spans 0.5–3.0× in 0.05 steps,
+  and defaults to 1×. Change it during narration, preview,
+  preparation and pause: ready audio and pending prefetch remain reusable, preview
+  keeps playing, and paused audio does not resume. Reopen settings/recreate the service
+  player to verify persistence; test Google Translate's two engine rates independently.
+  Verify pitch and Anki audio remain unchanged. `TtsPlaybackRateDeviceTest` checks real
+  local PCM duration at both endpoints, chunked sentences, attachment and paused state
+  without network or saved-device changes; run it explicitly through `am instrument`.
+  `TtsRepositoryTest`, `TtsPlaybackControllerTest` and `TtsAudioRepositoryTest` cover
+  normalization, persistence, pending work, cache reuse and unchanged export synthesis.
+- Extra sentence delay remains independent of playback speed.
+  Verify extra sentence delay waits only during continuous playback, is cancelled by
+  stop/next/book/source changes, and resumes at the next sentence if paused in the gap;
+  this application delay must not be inserted into Anki exports.
+- In Voice, verify Preload sentences supports 1–20 and defaults to 5
+  for new settings or settings without a saved count; preserve an explicitly saved count. During playback, increase the count to fill the larger window
+  and decrease it to cancel excess pending synthesis. The current sentence must keep
+  playing and completed audio must remain reusable. Repeat while paused, at book end,
+  after reopening settings and with short sentences. Restore the original count.
+  `TtsPlaybackControllerTest`, `TtsRepositoryTest` and `TtsAudioRepositoryTest` cover
+  bounds, persistence, moving windows and cache reuse; keep export/source configuration
+  behavior independent of prefetch depth.
+
+- Explicitly run `TtsVoiceSettingsTest`
+  and `TtsProviderConfigurationTest`, plus `TtsPanelStateTest`, using `am instrument`. Their isolated UI/callback
+  fixtures cover long lists, raw IDs, third-party engines, cloud actions, preview cancellation
+  and credential drafts without saved-device changes, real keys or network calls.
+  `TtsPanelStateTest` also verifies error isolation and installed-engine preview playback,
+  stop and natural completion with public Japanese text in test-owned cache. Pass
+  `-e ttsEngine <installed-offline-engine-package>` to isolate this test from a network-backed
+  system default; on the Samsung validation device use `com.samsung.SMT`. This must not
+  change system preferred-engine settings.
+- Online catalog reuse: open/close the panel, switch away/back to a source, and restart
+  the app after its first successful list load. It must reuse the saved voice list without
+  network requests, clearing the list, or flashing loading state; there is no expiry refresh.
+  Region/key changes must use the new configuration, failed/corrupt loads must be retryable,
+  and explicit error retry must fetch again. Catalog files must contain no API key or bearer
+  token. `OnlineTtsEngineTest` covers every source, concurrent requests, engine recreation,
+  config changes and force retry with fixture responses. `TtsVoiceCatalogCacheTest`
+  covers same-configuration request coalescing, independent source requests, cancelled/
+  failed refresh, memory eviction, optional empty lists and persisted catalog reload.
+  During a slow self-hosted refresh, cached catalog reads must return immediately rather
+  than wait for the network; `CustomTtsEngineTest` checks this against a local test server.
+  `TtsPanelStateTest` checks warm
+  panel lifecycle/state without network. Keep installed-engine resume refresh so new
+  Japanese data remains discoverable. In e-ink, check the Voice tab and voice picker show
+  Loading voices text while loading; other themes retain the animated progress bar.
+- In focus mode, the existing top-right playback button controls Sasayaki for a loaded
+  audiobook and TTS for books without an associated audiobook. On a fresh Reader session,
+  the TTS button and bottom playback controls must remain hidden, including after preview
+  alone. Start TTS manually from its panel or a lookup popup: both controls become available
+  and remain visible when paused. Closing/reopening or switching books hides them again.
+  Start TTS from the middle of a chapter; first playback must begin at the displayed position.
+  Pause, browse elsewhere, and resume: the existing narrated sentence resumes. Check play/pause icon updates,
+  cancellation while preparing, and lookup auto-pause: pressing the pause icon cancels
+  auto-resume when the popup closes. Toggle Show Audiobook / TTS Toggle in Appearance:
+  it hides either source’s button. This preference remains editable with Sasayaki disabled,
+  and disabling Sasayaki must not hide or disable TTS. Associated unavailable audiobooks
+  never show a TTS fallback button. Playback failure opens the existing TTS error panel.
+  `ReaderTopPlaybackControlTest` covers source callbacks and shared visibility preferences.
+- Check Reader TTS in the shared 70% bottom panel: only sentence controls remain above
+  Voice/Replacements/Settings, without a cover, book title or sentence preview.
+  Confirm Source and Voice have explicit labels in one compact card and open separate lazy bottom lists,
+  without search fields. Sources group all installed engines, online services and key-based
+  cloud services; unknown saved sources/voices remain visible and selectable under raw IDs.
+  Cloud rows alone offer credential actions; tapping an action must not select that source.
+  Only installed sources show the system TTS settings action. Check list scrolling, selected
+  checkmarks and dismissal/return. Connection status is supporting text with the Voice label,
+  determined by the selected voice’s catalog network requirement. Verify online and offline
+  voices within the same installed engine update that status; unknown saved voices have
+  no inferred status. Voice names retain their original identifiers in the card and picker,
+  and each catalog voice row identifies its network requirement.
+  Check engine rate/playback speed/pitch sliders retain current-value labels without endpoint
+  labels or dense ticks, keep existing steps/ranges, and save on
+  release. Pitch zero uses `0 st`/`0 Hz`. The theme-colored Preview button stays visible outside
+  the scroll area, above system navigation, in both the reader sheet and standalone Settings,
+  including compact panels and e-ink. Scroll between Source and the last synthesis parameter
+  and confirm its position and tap target remain fixed. It must show preparing/stop states
+  and cancel or stop its own preview; reading controls still operate the book session.
+  Test credential draft/cancel/save with blank-key retention, loading, verified/error states,
+  and cancellation on dismiss. Source errors stay beside the voice card and cannot leak into
+  Replacements/Settings; failed shared behavior writes still report an error in Settings.
+  Compare light/dark, sepia and e-ink layouts, dictionary add/edit/cancel.
+  Edit shared behavior and colors
+  in Settings and confirm Sasayaki reflects them, and vice versa; change two different
+  controls without waiting for recomposition and confirm both values persist after reopening.
+  Repeat with Reader appearance and audiobook sync settings; restore original values.
+  TTS must not expose seconds-based navigation or change audiobook-only preferences.
+  Check long source/voice names wrap without crowding the card and remain complete in
+  selection lists; check empty/long dictionaries, e-ink outlines, and standalone TTS
+  Settings. Compare Sasayaki's tabs, resource cards and sliders after shared UI changes.
+  In each source's Voice picker, use the fixed top Refresh voices action: it must bypass
+  the catalog cache, keep the picker open and the selected ID unchanged, disable repeated
+  refresh taps during loading, and retain old choices after failure. Confirm a successful
+  refresh includes newly advertised voices and survives reopening without another request.
+  Check manual OpenAI IDs remain available during refresh and e-ink uses loading text.
+  Parameters appear directly without a separate heading or toggle. With Azure, Microsoft Translator or
+  Google Cloud selected, check Audio format and Sample rate: short labels/values fit on one line at normal font size,
+  while dropdowns open from the right-side arrow. Short values must leave remaining
+  width to the label; long values must stay bounded without pushing the arrow out.
+  Provider pause switches use plain rows matching Settings, retaining default/custom
+  supporting text and showing their unchanged sliders when enabled. Remaining parameter
+  cards have compact padding; Audio format/Sample rate appear as plain rows. Check long labels and wrapped supporting text without
+  overlap, and confirm Sasayaki/shared behavior rows retain their layout.
+- `TtsBookRepositoryTest` covers XHTML self-closing script/style tags in both
+  inline and cached chapter sources: body text, ruby, image boundaries and sentence
+  offsets must survive, while ordinary HTML retains malformed-markup recovery. It also
+  covers shared chapter reuse, LRU eviction and separate reopened-book identities.
+  Opening Reader must not prepare all book text or start audio. Open TTS in a middle chapter,
+  start there, and navigate/continue across empty or non-reading chapters: previous/next
+  availability, full-chapter dialogue/ruby, image holds and pause state must remain correct.
+  `TtsPlaybackControllerTest` covers cross-chapter prefetch limits, paused navigation,
+  image holds, deleted sentences and cancelled chapter reads after switching books;
+  `TtsSessionPlayerTest` covers media commands at chapter boundaries.
+- In TTS Settings, Use Ruby readings defaults on for new and existing preferences.
+  Toggle it off with a ruby sample such as 今日 annotated キヨウ: playback, full-sentence
+  preview and Anki sentence audio must send 今日 to the engine. Re-enable to use キヨウ;
+  custom replacement 今日 → きょう must win in either state, retaining book/global scope
+  precedence. Source text, ruby visibility, lookup and highlight offsets stay unchanged.
+  The flag is global across books/sources and survives panel/app reopening; shared Sasayaki
+  settings must remain unchanged. During pending synthesis, toggling it pauses/invalidates
+  preparation so obsolete callbacks cannot resume; resume uses the new setting/cache key.
+  `TtsTextTest`, `TtsRepositoryTest`, `TtsAudioRepositoryTest` and `TtsPlaybackControllerTest`
+  cover these boundaries; `TtsPanelStateTest` covers the actual Settings switch and reopening.
+- Long-press book text and choose Replace beside Highlight: prefill the selected original and
+  empty replacement text, and preview the full source sentence including ruby and VN
+  text outside the screen. Check the dialog title identifies TTS, the equal-width
+  scope selector beside its label, compact rule/regex row, and full-width themed secondary
+  preview button (including its busy state),
+  in both languages and light/dark/e-ink themes. Cancel without saving. With a multilingual IME, start in another input
+  language and focus each original/replacement field: both should request Japanese.
+  Repeat from the TTS replacement editor: existing entries show a theme-danger-colored
+  Delete action on the same row as Cancel/Save; new entries show only Cancel/Save.
+  Check Dictionary search still requests the
+  selected content language and retains its Search action; no system keyboard preference
+  should be changed. IMEs without locale-hint support may retain their current language.
+
+- Create literal punctuation rules such as `――` → `、` and `……` → `。` in both
+  book/global scopes. Preview, playback and `{sentence-audio}` must use the same rules;
+  source text, sentence boundaries and highlighting must stay unchanged. Check
+  longest-match/book precedence, editing/deleting, exact
+  punctuation matching (different dash characters stay distinct), non-kana and multiline
+  replacements, empty-match validation and duplicate conflicts. Leave replacement text empty
+  in literal and regex modes: save/reopen the deletion rule, verify the list identifies deletion
+  and the preview shows the actual result. If the whole sentence disappears, Save remains
+  enabled and Preview is disabled with an empty-result message. Continuous playback skips
+  consecutive deleted sentences, preserving image holds and lookup pause/cancellation; single
+  sentence playback and the end of a fully deleted book stop without errors. Anki exports
+  of an empty result report no readable text and never create empty audio files. Replacement text is plain text,
+  never executable SSML, and inserted replacements are not recursively matched.
+  Reopen the app with existing pronunciation entries: they must load unchanged; saving
+  a replacement or changing synthesis settings must preserve old rules and scopes.
+- In replacement creation/editing, toggle regex for `([\p{Han}])々` → `$1$1`:
+  `時々` becomes `時時`, while an explicit `人々` → `ひとびと` and EPUB ruby keep priority.
+  With ruby disabled, the same base text becomes eligible for regex. Verify original/actual
+  TTS input for both modes, full-source selection context and editable Settings sample text.
+  Test invalid patterns/group references, zero-width matches, supplementary kanji, overlapping
+  patterns, book/global scope, existing entry editing and mode persistence after reopening.
+  The Preview button must not play an obsolete draft while text updates; its configuration
+  snapshot must match the displayed result. During scope changes, Preview and Save stay
+  visually enabled when the previous result was valid. Click Preview before calculation
+  completes: it must play the new result once ready; another edit cancels the queued click.
+  Save during calculation must validate/persist the current scope and text. Check unselected
+  scope options blend with the dialog surface in light/dark/e-ink themes, and section title,
+  small before/after labels, subdued original and stronger output color remain visually distinct;
+  original and output body text use the same size, including editable sample text. Check normal/e-ink dialog scrolling and footer.
+  With a long sentence preview and the software keyboard open, the replacement field's
+  Done action dismisses the keyboard without saving; then Save persists the draft.
+  Open new and existing replacements from Reader and Settings: the first visible dialog
+  must include its initial validation/preview content, without an empty intermediate
+  layout that changes window size. Hold preview computation pending while editing:
+  keep the dialog/result area visible and never play the old result while the current result is pending.
+  `TtsWordEditorTest` controls the preview dispatcher to check both transitions.
+  `TtsRegexReplacementTest`, `TtsRepositoryTest`, `TtsAudioRepositoryTest` and the non-destructive
+  `TtsWordEditorTest` cover matching, persistence, preview/export/cache and Compose controls.
+- Run `TtsTextTest`, `TtsRepositoryTest`, `TtsBookRepositoryTest`, `TtsPlaybackControllerTest`,
+  `TtsAudioRepositoryTest`, `TtsExportTest`, and `AnkiSentenceAudioTest` with the JVM suite. They cover source
+  ruby/offsets, file-backed chapters, literal scope precedence, long input splitting,
+  pending/paused replacement edits, stale callbacks, audiobook exclusion, cancellation
+  cleanup and the independent Anki handlebars. JS selection tests include full VN source
+  context rather than screen-clone text.
+  Hold a later synthesis pending while requesting already cached audio: it must return
+  immediately. `AndroidTtsEngineTest` repeats this through the real router/audio repository
+  with narration/dialogue routing and a controlled system-engine synthesis queue. It also
+  covers per-engine/automatic catalog isolation, coalesced cold discovery, forced refresh
+  and cached reads during failed/cancelled/pending refreshes. Installed-engine catalogs
+  must remain memory-only; ordinary playback/preview/export reuse them while panel resume
+  and manual Refresh voices force discovery. Concurrent misses for one sentence share
+  synthesis; clearing requires a fresh file. Advancing playback must retain pending
+  prefetch and extend its horizon.
+  Fill the 32-sentence cache, replay an old multipart sentence and prefetch 20 new
+  sentences: all replay files must remain readable and a further replay must reuse them
+  without synthesis. Evict the least recently used sentence instead. This is covered by
+  `TtsAudioRepositoryTest`.
+- With a Japanese engine installed, build `assembleDebugAndroidTest`, install both
+  APKs using `adb install -r`, and run only the explicit classes
+  `moe.antimony.hoshi.features.tts.TtsEngineDeviceTest` (including punctuation replacement
+  playback/export using isolated rules/cache) and
+  `moe.antimony.hoshi.features.tts.TtsSessionPlayerTest`, plus
+  `moe.antimony.hoshi.features.reader.ReaderTtsHighlightWebViewTest` via `am instrument`.
+  These discover installed voices and synthesize into test-owned cache, without changing
+  engine preferences or library data. Require `OK (7 tests)` (or the current test count).
+  Discovery tests query every installed engine reporting Japanese support and synthesize
+  each of its offline Japanese voices. `TtsLocaleTest` covers both `ja` and Samsung's
+  `jpn` locales. After installing voice data in system settings, return to an already-open
+  TTS panel and verify that its voice choices/error state refresh without reopening it.
+  The engine tests include image-backed ruby through the playback repository invoked
+  from Main. `TtsTextTest` covers zero-width insertions (including shared/end positions),
+  invalid ranges and sentence export: every source cursor step must advance or finish,
+  and glyph readings must not alter Reader offsets. Include a chapter with image-backed
+  ruby in continuous playback checks so the configured prefetch path is exercised.
+  The Reader fixture verifies actual sentence highlight pixels across all six
+  mode/writing-direction combinations using an explicit saturated highlight color;
+  do not apply opaque-color thresholds to the default translucent highlight.
+- In each paginated/continuous/VN mode and writing direction, play from the current
+  position and selected sentence; check full source ruby, highlight position, chapter
+  transitions, page following, image holds and lookup pause/resume. Change voice/rate
+  while preparing and verify playback pauses. Edit readings during playback, while
+  paused and while preparing; replay/next must use the new reading. Check overlapping
+  entries, book/global scope, duplicate errors, persistence and context preview.
+  Pause narration and navigate within the chapter, then use Contents to select both
+  earlier and later chapters. Reader must retain the manual position after chapter
+  restoration and after background/foreground. Returning to the narrated chapter may
+  restore its highlight without jumping to it or completing a VN reveal. Resuming
+  narration follows its retained sentence only when auto-follow is enabled.
+  `ReaderTtsPresentationTest` covers paused/playing, same/different chapters,
+  auto-follow, preparation/restore races and obsolete sentence/stop states.
+  `ReaderPlaybackPresentationTest` covers ordered tail/intermediate/target chapter
+  image holds, direct jumps, zero-duration holds and pausing during a hold. Both
+  TTS and Sasayaki must use this shared traversal. During natural TTS playback,
+  bring Reader back to foreground while an image is held: the image must remain
+  visible for its configured duration; opening it fullscreen must defer continuation
+  until dismissal. Manual next/previous/replay must skip intervening media.
+  `ReaderTtsHighlightWebViewTest` exercises actual image pixels followed by sentence
+  highlight pixels across all six mode/direction combinations, including a simulated
+  restore callback while TTS is preparing.
+- Open a source lookup popup with and without TTS already playing. Verify replay stops
+  after its selected sentence, toggle reflects playback and cancels pending lookup
+  auto-resume, and play-forward closes the popup and continues from that source sentence.
+  Nested dictionary popups must not acquire a book playback anchor; linked audiobooks
+  keep their original controls. `ReaderTtsPopupTest` and the reader popup JS tests cover
+  source visibility and command routing; controller tests cover replay/forward boundaries.
+  For both Sasayaki and TTS, tap another book word while lookup auto-pause is active:
+  the old popup must be replaced without any intervening audio or auto-page. Dismissing
+  the final popup or tapping a lookup miss resumes once; nested popup dismissal and
+  selecting a replacement word retain the pending resume. Explicit pause cancels it.
+  For TTS, also pause at sentence completion, during the configured sentence delay and
+  during next-sentence synthesis. Closing lookup advances from finished audio; the last
+  sentence and single-sentence replay stay stopped. `TtsPlaybackControllerTest` and
+  `ReaderWebViewStateHolderTest` cover these states. `TtsLookupPauseDeviceTest` forces
+  lookup pause before the real Media3 completion batch using local PCM and isolated
+  preferences, without network requests or changing the user's sources/library.
+- Test Home/lock screen, notification/headset previous/next sentence and pause/resume,
+  interruptions, task removal while preparing, and explicit Reader exit. After TTS has
+  created a media session, leave and reopen a book and switch to another book before
+  starting playback. Source parsing must keep the empty media session idle with
+  `isLoading=false`; only preparation of an explicitly started sentence is media
+  buffering. `TtsSessionPlayerTest` covers this transition without changing library data. The session
+  must expose no time seek commands. Check no engine, missing Japanese data, removed
+  selected engine, offline network voice, timeout and retry without clearing app data.
+- Associate/remove an audiobook: TTS stops, its sheet closes and Reader entry hides;
+  removal restores the entry without autoplay. A missing associated file must stay in
+  Sasayaki recovery. TTS Settings/dictionary stay accessible. Sasayaki's enable switch
+  must not disable TTS; behavior colors/auto-follow/image holds/pause are shared.
+- In Anki, verify old/default mappings never synthesize TTS. Only a selected template
+  containing `{sentence-audio}` prepares audio; no match for an associated audiobook
+  reports failure without TTS fallback. Referencing both audio handles for the same cue
+  uploads once. Cancel a popup during synthesis, retry errors, and check no temporary
+  export survives cancellation. Create test cards only with explicit user authorization.
+
+## Self-hosted TTS
+
+- Add multiple named OpenAI Compatible and VITS Simple API sources from Source. Save
+  without requiring a network connection; saving a new source must select it immediately
+  and prepare its voice choices without starting playback. Editing an unselected source
+  must retain the current selection; failed saves/cancel must not switch sources.
+  Test an unsaved draft, then cancel. Saved keys
+  stay blank, and Cancel/close cancels requests. Test ordinary and e-ink presentation.
+  In both custom and cloud configuration sheets, connection testing, its success/error
+  result and Save/Cancel must remain visible outside the scrolling form. Complete a
+  delayed success/failure after scrolling and verify no second scroll is needed, the
+  test button stays in place, and editing connection fields clears stale feedback.
+  E-ink uses a static test indicator; canceling still terminates the pending test.
+- OpenAI bases include `/v1` (or the server's API prefix); VITS bases are server roots.
+  In the Model ID field, the trailing list action opens a nearby menu for one or more
+  models without changing the entered ID; selecting updates that same editable field.
+  Empty/failed lists retain manual input and the entered ID. Verify loading disables
+  repeated requests, canceling the editor cancels discovery, and e-ink uses a static icon.
+  Verify reverse-proxy prefixes, optional keys, manual OpenAI model/voice IDs when lists
+  are absent, VITS Japanese speaker names and compound model/speaker identifiers.
+- Switch servers and restore each model/voice/rate/format. Rename the selected server or
+  edit/delete another while narrating without interruption. Editing active synthesis
+  configuration pauses; deleting the active server selects system default without playing.
+- `CustomTtsDeviceTest#selfHostedVitsCatalogPlaybackCacheAndAnkiExport` accepts explicit
+  instrumentation argument `vitsUrl` to opt into a caller-provided service. It reads speakers,
+  synthesizes public samples as WAV/MP3, exercises isolated Media3 playback and sentence
+  export, and uses only test-owned cache and settings. No model/configuration mutation,
+  private book text, application preferences, cloud keys or application data clearing.
+  `selfHostedOpenAiCatalogRefreshPlaybackCacheAndAnkiExport` accepts `openAiUrl` and
+  `openAiModel` for the equivalent OpenAI flow. Both explicitly refresh the catalog and
+  verify cached choices before exercising WAV/MP3 playback, reuse and sentence export.
+- VITS requests must send `Content-Type: application/json` without an appended charset.
+  `CustomTtsEngineTest` exercises the server's strict JSON/form distinction, optional
+  OpenAI discovery, prefix/auth/rate mapping, invalid audio and cancellation cleanup.
+- Keep OpenAI manual Preview/Play usable while optional voice discovery is pending. A
+  temporary network/catalog error must not persist an empty voice list; test successful
+  recovery, while unsupported discovery endpoints remain usable without repeated loading.
+- Configure available OpenAI voice IDs in Source, one per line, then choose under Voice.
+  Check persistence and de-duplication with discovered IDs, including a pending/failed
+  optional list request. Editing available IDs keeps the chosen voice and ongoing audio;
+  VITS voices use server-provided character names and compound model/speaker identifiers.
+- Select self-hosted WAV/MP3 only under Voice; Source configuration contains
+  no duplicate format control. Changing format preserves the selected voice and other
+  server profiles, and switching sources restores each server's format.
+- Cloud/self-hosted sources default to MP3. Select WAV and MP3 and verify both choices
+  survive an unrelated settings edit and repository recreation. Installed system synthesis
+  continues to use WAV. `TtsRepositoryTest` covers these persistence boundaries.

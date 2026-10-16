@@ -87,7 +87,7 @@ internal fun ReaderAppearanceScreen(
     profileName: String,
     onSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     sasayakiSettings: SasayakiSettings,
-    onSasayakiSettingsChange: (SasayakiSettings) -> Unit,
+    onSasayakiSettingsChange: ((SasayakiSettings) -> SasayakiSettings) -> Unit,
     fontManager: ReaderFontManager,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
@@ -131,7 +131,7 @@ internal fun ReaderAppearanceSheet(
     progressDisplay: ReaderProgressDisplay = ReaderProgressDisplay.characters(),
     onSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     sasayakiSettings: SasayakiSettings,
-    onSasayakiSettingsChange: (SasayakiSettings) -> Unit,
+    onSasayakiSettingsChange: ((SasayakiSettings) -> SasayakiSettings) -> Unit,
     fontManager: ReaderFontManager,
     onDismiss: () -> Unit,
     viewModel: ReaderAppearanceViewModel = hiltViewModel(),
@@ -177,7 +177,7 @@ private fun ReaderAppearanceContent(
     progressDisplay: ReaderProgressDisplay = ReaderProgressDisplay.characters(),
     onSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     sasayakiSettings: SasayakiSettings,
-    onSasayakiSettingsChange: (SasayakiSettings) -> Unit,
+    onSasayakiSettingsChange: ((SasayakiSettings) -> SasayakiSettings) -> Unit,
     fontManager: ReaderFontManager,
     viewModel: ReaderAppearanceViewModel,
     contentPadding: PaddingValues,
@@ -739,13 +739,13 @@ private fun ReaderAppearanceContent(
                             },
                         )
                     }
-                    readerAppearanceSasayakiRows(sasayakiSettings).forEach { labelRes ->
+                    readerAppearancePlaybackRows().forEach { labelRes ->
                         AppearanceDivider(palette)
                         SwitchRow(
                             label = stringResource(labelRes),
                             checked = sasayakiSettings.showReaderToggle,
                             onCheckedChange = {
-                                onSasayakiSettingsChange(sasayakiSettings.copy(showReaderToggle = it))
+                                onSasayakiSettingsChange { current -> current.copy(showReaderToggle = it) }
                             },
                         )
                     }
@@ -951,8 +951,8 @@ private fun ReaderAppearanceContent(
     }
 }
 
-internal fun readerAppearanceSasayakiRows(settings: SasayakiSettings): List<Int> =
-    if (settings.enabled) listOf(R.string.reader_appearance_show_sasayaki_toggle) else emptyList()
+internal fun readerAppearancePlaybackRows(): List<Int> =
+    listOf(R.string.reader_appearance_show_sasayaki_toggle)
 
 internal fun readerAppearanceFontOptions(importedFontNames: List<String>, selectedFont: String): List<String> =
     (listOf(ReaderFontManager.publisherFont) + ReaderFontManager.defaultFonts + importedFontNames + selectedFont)

@@ -47,6 +47,7 @@ fun AdvancedSettingsView(
     onReaderSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     onClose: () -> Unit,
     onBooksRestored: () -> Unit = {},
+    onOpenTts: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var destination by remember { mutableStateOf<AdvancedDestination?>(null) }
@@ -116,8 +117,7 @@ fun AdvancedSettingsView(
                                 colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                                 leadingContent = { Icon(row.icon.imageVector(), contentDescription = null) },
                                 headlineContent = { Text(stringResource(row.titleRes)) },
-                                supportingContent = row.subtitleRes?.let { subtitleRes -> { Text(stringResource(subtitleRes)) } },
-                                modifier = Modifier.clickable { destination = row.destination },
+                                modifier = Modifier.clickable { if (row.destination == AdvancedDestination.Tts) onOpenTts() else destination = row.destination },
                             )
                             if (index != section.rows.lastIndex) {
                                 GroupDivider()
@@ -144,6 +144,7 @@ fun AdvancedSettingsView(
 internal enum class AdvancedDestination {
     Audio,
     Sasayaki,
+    Tts,
     Backup,
     Syncing,
     AnkiConnect,
@@ -163,7 +164,6 @@ internal data class AdvancedSettingsRow(
     @param:StringRes val titleRes: Int,
     val destination: AdvancedDestination,
     val icon: AdvancedSettingsIcon,
-    @param:StringRes val subtitleRes: Int? = null,
 )
 
 internal data class AdvancedSettingsSection(
@@ -179,11 +179,11 @@ internal fun advancedSettingsSections(): List<AdvancedSettingsSection> =
                     destination = AdvancedDestination.Audio,
                     icon = AdvancedSettingsIcon.Speaker,
                 ),
+                AdvancedSettingsRow(titleRes = R.string.tts_title, destination = AdvancedDestination.Tts, icon = AdvancedSettingsIcon.Speaker),
                 AdvancedSettingsRow(
                     titleRes = R.string.advanced_sasayaki_audiobooks,
                     destination = AdvancedDestination.Sasayaki,
                     icon = AdvancedSettingsIcon.Waveform,
-                    subtitleRes = R.string.advanced_sasayaki_subtitle,
                 ),
             ),
         ),
@@ -207,7 +207,6 @@ internal fun advancedSettingsSections(): List<AdvancedSettingsSection> =
                     titleRes = R.string.settings_book_cover_wallpaper,
                     destination = AdvancedDestination.BookCoverWallpaper,
                     icon = AdvancedSettingsIcon.Wallpaper,
-                    subtitleRes = R.string.settings_book_cover_wallpaper_subtitle,
                 ),
             ),
         ),

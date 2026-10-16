@@ -570,6 +570,7 @@ class ReaderSettingsRepositoryTest {
                     visualNovelMergeCrossScreenSasayakiCues = true,
                     volumeKeysTurnPages = true,
                     volumeKeysNavigatePopupTerms = true,
+                    volumeKeysSeekSasayaki = true,
                     lockCurrentOrientation = true,
                     openLastReadBookOnLaunch = true,
                 )
@@ -588,6 +589,7 @@ class ReaderSettingsRepositoryTest {
             assertTrue(inherited.visualNovelMergeCrossScreenSasayakiCues)
             assertTrue(inherited.volumeKeysTurnPages)
             assertTrue(inherited.volumeKeysNavigatePopupTerms)
+            assertTrue(inherited.volumeKeysSeekSasayaki)
             assertTrue(inherited.lockCurrentOrientation)
             assertTrue(inherited.openLastReadBookOnLaunch)
 
@@ -603,6 +605,7 @@ class ReaderSettingsRepositoryTest {
                     visualNovelMergeCrossScreenSasayakiCues = false,
                     volumeKeysTurnPages = false,
                     volumeKeysNavigatePopupTerms = false,
+                    volumeKeysSeekSasayaki = false,
                     lockCurrentOrientation = false,
                     openLastReadBookOnLaunch = false,
                 )
@@ -620,6 +623,7 @@ class ReaderSettingsRepositoryTest {
             assertTrue(japanese.visualNovelMergeCrossScreenSasayakiCues)
             assertFalse(japanese.volumeKeysTurnPages)
             assertFalse(japanese.volumeKeysNavigatePopupTerms)
+            assertFalse(japanese.volumeKeysSeekSasayaki)
             assertFalse(japanese.lockCurrentOrientation)
             assertFalse(japanese.openLastReadBookOnLaunch)
         }

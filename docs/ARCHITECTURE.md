@@ -430,6 +430,13 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   instead of mixing unscaled layout offsets with scaled scroll coordinates.
 - Lookup opens from a single tap on reader text. Long press is reserved for
   native selection/highlight flows.
+  `ReaderLookupPauseState` owns the shared Sasayaki/TTS lookup interruption policy:
+  pause once, preserve the resume action across root/child popup replacement, consume
+  it once when the stack becomes empty, and clear it when manual pause cancels recovery.
+  Root lookup resolves before replacing the stack; it never transiently empties the
+  stack between two successful selections. A lookup miss or final dismissal resumes
+  the original source. TTS supplies its generation-checked resume action; Sasayaki
+  resumes only the same player instance if it is still paused.
 
 ## Integrations
 
@@ -764,3 +771,337 @@ Hard constraints:
 
 Durable validation commands, emulator data-safety rules, test data, and manual
 QA matrices live in `docs/VALIDATION.md`.
+
+## Content Input
+
+- `HoshiTextFields.hoshiContentKeyboardOptions` supplies content-language IME locale hints,
+  keyboard type and focus behavior independently of app display language. Dictionary search
+  uses its current content profile with the Search action; pronunciation written-form and
+  reading fields request Japanese. IMEs decide whether to honor the locale hint.
+
+## Japanese TTS
+
+- `features/tts` is an independent Hilt feature. `TtsRepository` persists source,
+  Japanese voice, engine speech rate, independent Hoshi playback speed, pitch, provider parameters, playback sentence delay, prefetch
+  depth, named self-hosted server profiles, the global `useRubyReadings` flag (default true), and scoped text-replacement entries in the `japanese_tts`
+  Preferences DataStore. It does not extend Sasayaki
+  sidecars or sync payloads. UI events submit setting transforms; the repository applies
+  them to the latest preferences inside one DataStore transaction, so independent edits
+  do not replace newer settings with a captured UI snapshot.
+  `routingBySource` owns voice selection, including when dialogue routing is off;
+  `TtsSettings.voice` is derived from its narration entry. Custom profiles own their rate;
+  installed/built-in sources share the engine speech rate.
+  Cloud API keys are AES-GCM ciphertext bound to the provider ID, using a non-exportable
+  Android Keystore key through `TtsCredentialCipher`; an unavailable device key
+  requires the API key to be entered again. UI fields never read keys back or put them
+  in saveable state, URLs, logs or visible errors.
+- Optional narration/dialogue routing is stored per Source in `routingBySource`, default
+  off. `TtsVoiceRouting.initialized` distinguishes first activation (both voices inherit
+  the current voice) from reactivation (the dialogue choice is retained). The selected
+  narration voice is read from the same source selection used when routing is off. Both routes share credentials,
+  provider parameters and Hoshi speed; Voice presents shared style/role and pitch/rate
+  capabilities. Connection tests omit routing and test only the draft source.
+  `TtsDialogue` finds complete paired Japanese quotes before chapter sentence slicing,
+  retains nested/cross-paragraph dialogue, resets at each chapter and treats unmatched
+  markers as ordinary text. Sentence-local UTF-16 role ranges retain the original
+  matchable Reader offsets. Lookup selection matches source text at its normalized
+  anchor, preserving punctuation/symbol roles and distinguishing repeated occurrences;
+  chapter parsing and selection projection stay on the book repository's IO dispatcher.
+  Text replacement/ruby emission keeps original roles, including sentence-end zero-width
+  glyph readings. A replacement spanning role boundaries belongs to its first non-quote
+  source character. Original text, highlighter and Anki sentence text stay unchanged.
+  `ttsSynthesisPlan` resolves two voices within one Source, coalesces adjacent identical
+  effective voices and attaches punctuation-only ranges to spoken content. Custom voice
+  overrides are request-local source selections; adapters read the effective voice/rate
+  through `TtsSettings`, without copying speaker state into connection profiles.
+  OpenAI's omitted voice remains the server default; its first catalog entry is not
+  assumed to be that default. Optional discovery is not a synthesis prerequisite.
+  Ordered effective configurations/text key one sentence cache entry, preserving the
+  32-sentence bound; all sentence parts must finish before playback. Role changes do not
+  alter sentence navigation, image holds or add an app-level intra-sentence pause.
+  Export first uses lossless MP3/WAV concatenation. Only incompatible sample formats
+  trigger the Hilt-injected `AndroidTtsExportFallback`: Media3 Transformer normalizes
+  each part to 24 kHz mono and writes one AAC/M4A file. Transformer cancellation completes
+  on its looper before temporary inputs/output are removed; no additional output option
+  or Hoshi-speed processing is introduced.
+- The Hilt-singleton `TtsBookRepository` reads complete chapter source on demand, including
+  file-backed cached EPUB chapter shells, on the injected IO dispatcher. Its four-entry LRU
+  cache is keyed by book instance and chapter, shared by playback, lookup/replacement
+  previews and Anki. A reopened book gets a fresh source identity. Opening Reader only
+  binds the book; opening its TTS sheet prepares the reading position without starting audio.
+  Navigation loads the requested complete chapter and its nearest readable neighbors,
+  skipping empty, non-linear and navigation chapters. Playback state holds one chapter
+  and explicit neighbor indices; prefetch crosses chapters while retaining its sentence bound.
+  `TtsText` retains
+  matchable source offsets and UTF-16 ruby ranges, sentences and image boundaries.
+  Chapter extraction uses the declared MIME type: XML parsing for XHTML preserves
+  self-closing script/style boundaries; ordinary HTML retains HTML error recovery.
+  Literal dictionary matching prefers longest surfaces, then book scope over global
+  scope; ruby is used where no custom replacement overlaps and the global Use Ruby readings
+  preference is enabled. Disabling it leaves original base text for the engine and suppresses
+  zero-width image-glyph readings; custom replacements still apply. Playback, preview and Anki
+  exports all read this flag through `TtsAudioRepository`, retaining source ruby/ranges for
+  later re-enabling. It participates in synthesis invalidation and audio cache identity. Replacement values accept
+  any plain text, preserving whitespace; empty replacements delete their matched source ranges.
+  Empty synthesis plans return no playback files without discovering voices or calling engines.
+  The controller traverses these sentences in its cancellable preparation loop, retaining image
+  presentation and single-sentence boundaries without adding sentence delays; empty exports
+  report `EmptyText` and produce no media file. Matching is a single pass over the
+  original sentence; inserted text is never matched again. Literal replacement is the default. `TtsRegexReplacement` uses RE2/J with a bounded compiled-rule cache,
+  numeric `$0`/`$1` capture templates and backslash escaping. Invalid patterns/templates
+  are rejected on save; zero-width matches are ignored. Literal match ranges and usable
+  ruby are protected from regex matches; each pattern scans the original sentence with
+  non-overlapping matches, then rules at the same start prefer the longest match and book
+  scope on ties (remaining ties retain saved order). Matches across dialogue boundaries
+  retain first-non-quote ownership. Preview computes on Default using the same `TtsText`
+  transform and passes its immutable preferences snapshot to synthesis. The editor retains the
+  last result and action availability during recomputation; Preview clicks wait for the current
+  result, and further edits cancel the queued click. Save validates the current draft through
+  the repository without waiting for preview computation. Both literal/regex
+  editors display before/after text; settings entry adds editable preview text. Replacements affect synthesis
+  only, preserving original sentence boundaries, offsets, lookup text and Anki sentence text. Mining rebases ruby against
+  the selected source occurrence, including full
+  VN source sentences, rather than looking up the first matching text.
+  Image-backed ruby uses zero-width insertions, emitted once at each source position;
+  only positive, in-bounds ruby ranges may advance the source cursor. Playback text
+  preprocessing, cache hashing and file access run on the repository's injected IO
+  dispatcher, including calls made by the main-thread playback controller.
+- `AndroidTtsEngine` serializes installed-engine discovery and `synthesizeToFile`,
+  filters Japanese voices, bounds initialization/utterance waits, splits oversized
+  inputs, and accepts files only after completion. `TtsEngineRouter` dispatches installed
+  engines to this adapter and the five explicit online sources to `OnlineTtsEngine`:
+  Edge Read Aloud WebSocket, Azure Speech REST, Microsoft Translator, Google Cloud
+  Text-to-Speech REST and Google Translate's unofficial speech RPC. Network-required voices and unofficial
+  sources are labeled in the UI. No voice model is bundled and failures never select
+  another provider automatically.
+  `CustomTtsEngine` is the third router backend for `custom:` IDs. OpenAI-compatible
+  profiles use a base URL including the API prefix and `/audio/speech`; VITS Simple API
+  uses the server root, `/voice/speakers`, and model-specific synthesis routes for VITS,
+  W2V2-VITS, Bert-VITS2 and GPT-SoVITS. Voices retain model-type/speaker-ID identity and
+  exclude advertised non-Japanese and audio-conversion models. JSON requests use exactly
+  `application/json`: VITS Simple API compares this header literally and otherwise parses
+  an empty form. VITS length is inverse engine rate; GPT-SoVITS uses server rate and an
+  optional existing reference preset. OpenAI model/voice IDs can be entered manually;
+  voice discovery is optional and never disables manual synthesis/preview controls. Unsupported
+  discovery (404/405) may cache an empty list; transient failures remain retryable and are not
+  persisted as empty catalogs. Only WAV/MP3 complete
+  responses enter the existing audio pipeline. Self-hosted calls allow 180 seconds, preserve
+  proxy path prefixes, disable redirects, use normal TLS validation, and share private HTTP
+  host rules with AnkiConnect through `network/PrivateHttpHost`. Credentials are encrypted
+  against each profile ID; protocol changes clear the draft's old credential. Named profiles
+  independently persist model, voice, rate and format.
+  Saving a newly created profile atomically selects it through `TtsRepository`;
+  `TtsViewModel` stops preview and refreshes its catalog after successful persistence.
+  Editing an existing unselected profile does not switch sources.
+  Cloud and custom configuration sheets share `TtsConnectionTestControls` in a fixed
+  footer above their Save/Cancel actions. A reserved status area above the test button
+  displays localized success or failure without extending the scrolling form; failures
+  take precedence over previous verification. Only an active connection test animates
+  the button indicator; e-ink uses a static Material hourglass.
+  Source configuration edits connection/model options and an optional OpenAI voice-ID list.
+  OpenAI model discovery is anchored to the editable Model ID field: its trailing action
+  loads `/models` and offers its IDs in the shared themed dropdown, even for a sole
+  result. Discovery does not change the entered ID until selection. Missing lists leave
+  manual entry available; model loading stays local to the field instead of using the
+  voice-loading status.
+  Output format is edited only among the Voice tab's parameters alongside other
+  supported providers. The Voice tab separates its scrolling controls from a fixed Preview
+  footer that consumes the bottom navigation inset. Parameters have no separate heading or
+  expansion toggle; standalone settings consume scaffold
+  padding before applying this footer inset.
+  Provider pause switches reuse `ReaderSheetSwitchRow` with optional supporting text rather
+  than individual cards; output format/sample rate also use plain rows, and remaining
+  parameter cards use compact vertical padding. Shared
+  slider heights and existing behavior-setting rows retain their defaults.
+  Cloud/self-hosted synthesis defaults to MP3; users can also choose WAV.
+  Installed Android engines generate WAV.
+  Voice owns speaker selection. VITS speaker names come from `/voice/speakers`, with
+  model-type/ID retained as secondary labels;
+  configured OpenAI IDs supplement discovered voices without duplicating IDs or overriding
+  server-provided labels. They are available during optional discovery and after failure.
+  `TtsSynthesisConfiguration` explicitly identifies the active generation inputs and
+  excludes display names, available voice-ID lists, other sources, prefetch count,
+  Hoshi playback speed and sentence delay. Both playback invalidation and audio caching
+  use it; changing sentence delay affects the next boundary without restarting synthesis.
+  Catalogs are stored by profile ID and connection fingerprint without timed refresh.
+  Missing `custom:` profiles fail configuration rather than falling through to Android.
+  Japanese voice filtering accepts both `ja` and `jpn` locale language codes (including
+  Samsung's ISO 639-2 locales). `AndroidTtsEngine` caches installed-engine catalogs in memory
+  by requested engine ID, keeping automatic selection separate from explicit packages.
+  Cached catalog reads bypass `AndroidTextToSpeech`'s serial platform synthesis queue;
+  cold discovery is coalesced, and failed/cancelled refreshes retain the last catalog.
+  Playback, preview and export reuse these catalogs, including narration/dialogue routing.
+  The platform adapter also reuses native `Voice` objects until discovery or an engine
+  connection change, avoiding a platform voice-list query for every synthesis request.
+  TTS panels force installed-engine discovery on resume and manual refresh so returning
+  from system voice installation updates their available voices. Device catalogs are not persisted.
+- Online/self-hosted voice lists are shared by panel, preview and synthesis through the
+  Hilt singleton `TtsVoiceCatalogCache`. It owns bounded memory storage and per-configuration
+  request coalescing; network waits do not hold the metadata lock, so cached reads and
+  other source requests remain available during refresh. Cancellation/failure retains the
+  last successful catalog. `TtsVoiceCatalogStore` owns atomic JSON files on the adapters'
+  IO dispatcher.
+  Catalogs have no age-based refresh. Source configuration fingerprints prevent reuse after
+  region/key changes without storing credentials in catalog files. Missing/corrupt catalogs
+  are fetched again, failures are not cached, and explicit error retry/configuration save
+  forces a fetch. Every Voice picker exposes a fixed manual refresh action above the list;
+  it bypasses the catalog cache without changing voice preferences or audio caches.
+  Refresh failures retain a valid previous catalog and show the localized error in the picker.
+  `TtsViewModel.catalogLoading` disables repeated refresh requests independently of preview
+  readiness, keeping manually configured OpenAI voices usable during optional discovery.
+  Warm panel openings retain the catalog and do not enter loading state;
+  installed-engine discovery still refreshes so newly installed engines remain selectable.
+- `OnlineTtsProtocol` owns service JSON/SSML, Japanese catalog filtering, UTF-8 length
+  limits and Edge framing. `OnlineTtsTransport` owns bounded HTTPS/WebSocket requests;
+  cancellation closes the active call/socket, and only a completed Edge turn may return
+  audio. Source adapters synthesize chunks serially and remove partial files on failure
+  or cancellation. Azure and Microsoft Translator share Speech REST synthesis and expose
+  advertised styles/roles, intensity and exact silence controls; Google Cloud exposes gain, encoding, sample rate and device profile. Edge
+  supports prosody rate/pitch/volume; Google Translate exposes only normal/slow speech.
+  Pitch controls use provider units and omit unsupported Google voice families.
+  Provider silence is bounded to 0–1000 ms and playback sentence delay to 0–2000 ms.
+  `TtsPauseSlider` uses these fixed ranges in 10 ms increments.
+  `TtsMp3` preserves MP3 without transcoding, joining long-sentence MPEG frames after
+  removing per-file ID3 and seek/duration headers; WAV chunks use `TtsWav`.
+- Cloud configuration, self-hosted configuration and model discovery share credential draft
+  resolution: blank input retains ciphertext, explicit removal clears it, and replacement
+  keys are trimmed/validated before encryption with the existing source-bound Keystore key.
+  Cloud configuration exposes a separate confirmed Delete key action. Its repository
+  transaction removes only that provider's saved ciphertext from the latest preferences,
+  retaining region and other settings without submitting unsaved form input. Success clears
+  the key draft and connection-test feedback; failure retains the saved key and permits retry.
+  `TtsAzureRegion` lists the supported public-cloud neural TTS regions with stable region codes
+  as display labels. Azure configuration uses the shared themed dropdown with compact rows and no
+  default selection.
+  Save/Test are gated by a supported region in both UI and ViewModel, while key deletion
+  stays independent. Translator continues using its authorization response's region.
+- `MicrosoftTranslatorSession` obtains ephemeral authorization from the unofficial
+  Translator endpoint using its public client signing protocol. Tokens and their returned
+  Speech region stay in memory, never in settings or exported media. A mutex shares token
+  acquisition; expiry refresh has a 60-second margin, and a rejected Speech token gets
+  one refresh/retry. The source never reads Azure subscription keys. Catalogs use the
+  returned regional Speech endpoint, so offered voices/styles reflect that service
+  rather than a hardcoded promise of Azure-wide availability.
+- `TtsPlaybackController` exposes immutable StateFlow, owns sentence navigation,
+  configuration invalidation and configurable sentence prefetch, and rejects stale operations
+  after stop/book/source changes. Previous/next preserves the playing state; explicit
+  start-at/replay still starts audio. Paused navigation invalidates preparation and lookup
+  resume actions, presents the selected sentence directly, and synthesizes nothing until
+  playback resumes. Decoder completion is recorded for the prepared sentence even while
+  paused, so resuming after a late end event advances rather than replaying an exhausted
+  buffer. Final/single-sentence completion remains stopped. The output inspects current
+  playback state in Media3's batched `onEvents` and ignores detached players.
+  `started` remains scoped to the Reader route/book session, so the
+  default-off global Behavior setting `volumeKeysSeekSasayaki` controls both audiobook
+  seeking and TTS sentence navigation. TTS becomes eligible only after that session has
+  explicitly started narration; the existing preference key/value remains unchanged.
+  Reader's existing hardware-key resolver gives enabled popup term navigation priority,
+  then audiobook/TTS navigation, then page turning; direction reversal and repeat/key-up
+  handling stay shared.
+  `TtsAudioRepository` keys temporary playback audio by
+  configuration (excluding prefetch depth and Hoshi playback speed) and resolved spoken text; independent export
+  files are owned by their caller and cleaned on cancellation, including cancelled dispatcher return delivery.
+  Cache lookups use a short metadata lock independently of the serial synthesis queue,
+  so ready audio never waits for another sentence's network request. The 32-entry audio
+  cache tracks access order; a hit promotes the complete sentence playlist before eviction.
+  This retains just-reused audio through the maximum 20-sentence prefetch horizon. Continuous playback
+  keeps valid in-flight prefetch and rolls its horizon forward by the saved 1–20 sentence
+  depth (default 5). Depth changes cancel/rebuild prefetch without pausing the current
+  sentence or invalidating completed audio. Hoshi playback speed (0.5–3.0×, default 1×)
+  updates the attached player live with unchanged pitch; it preserves pause, preparation and
+  prefetch, and is reapplied when the service player is recreated. Synthesis settings/dictionary changes and stop
+  still cancel it. Cache clearing serializes with
+  synthesis so late completions cannot repopulate a cleared cache.
+- `TtsPlaybackService` owns the Media3 ExoPlayer/session. `TtsSessionPlayer` exposes a
+  nonseekable sentence transport without seconds or a fabricated duration, and represents
+  synthesis/image holds as ongoing buffering only when a sentence has been explicitly
+  started. Book source parsing leaves an empty session idle and not loading, including
+  when the service survives a Reader exit or book switch. Media3 owns foreground notification and
+  audio focus. Reader attaches an optional presentation callback using the existing
+  cue-range commands and shared behavior settings; background progress needs no WebView.
+  Explicit Reader exit/route disposal stops playback; configuration recreation retains it.
+  `ReaderPlaybackPresentation` owns the ordered media-stop/chapter traversal shared
+  by Sasayaki and TTS. Both use the same image-hold/fullscreen-dismiss wait and
+  before-visible target restore; audio pause/resume stays in each playback adapter.
+  Only natural forward playback inspects intervening media; manual jumps and zero
+  image-hold duration restore directly. `ReaderTtsPresentation` separates active
+  playback following from passive highlight restoration. Paused narration may only
+  passively restore its highlight in the displayed chapter,
+  without revealing text or moving the page. An explicit paused sentence jump instead
+  reveals its target (including another chapter) through the shared direct-jump path. Chapter loads, image holds and post-restore
+  reveal decisions read current playback/sentence state, rejecting stopped or obsolete
+  presentations; returning to foreground uses the same policy. Restoration cannot
+  reveal a TTS sentence while synthesis or its image presentation is preparing;
+  the playback callback completes image holds before sentence reveal and audio.
+- Reader’s existing top-right playback button routes its playing state and callback
+  together through `ReaderTopPlaybackControl`: loaded audiobooks use Sasayaki, while
+  books without an audiobook use TTS only after explicit playback in the current Reader
+  session, using the same eligibility as the bottom playback controls. Pausing keeps both
+  controls available; preview alone does not enable them, and closing/switching books
+  resets eligibility. The shared `showReaderToggle` preference controls visibility;
+  Sasayaki’s enable switch only gates audiobooks. TTS toggles resume/pause the current
+  sentence. During lookup auto-pause, the button retains its pause icon and cancels
+  pending auto-resume when pressed. Reader-initiated playback
+  errors open the TTS panel so its existing error/recovery controls remain accessible.
+- Reader only offers the independent TTS sheet when no audiobook is associated.
+  Its fixed sentence controls and Voice/Replacements/Settings tabs use `ReaderBottomPanel`
+  and `ReaderSheetControls`, without book metadata or sentence previews. The segmented tabs, group card,
+  switch row and slider row in `ReaderSheetControls` are also used by Sasayaki, including shared
+  surface roles and e-ink outlines. TTS Settings uses the same tab content with its
+  own settings scaffold; the replacement list is lazy and keeps playback controls
+  outside its scroll area. Additional provider choices use anchored `HoshiDropdownMenu`
+  rows. Source and Voice share one compact card, with independent
+  48 dp touch rows opening lazy selection lists in `TtsSelectionSheet`, which reuses
+  `ReaderBottomPanel`. Sources group installed engines, online services and key-based
+  cloud services without guessing installed engine capabilities; an unavailable saved
+  source or voice remains visible under its original ID. The source picker exposes cloud
+  configuration actions for key-based services and editable self-hosted profiles. Its
+  system-settings action always appears above the Device engines group as a separate row,
+  independent of the selected source. Credential forms reuse the same sheet chrome, preserve encrypted
+  storage/blank-key retention, and test unsaved drafts with a public synthesis sample.
+  Canceling disposes the draft and its coroutine. Source errors appear beside the voice
+  card; shared behavior errors have a separate StateFlow and cannot show source failures
+  in the Settings tab. `TtsPreviewState` exposes idle/preparing/playing so the theme-colored
+  preview button can cancel preparation or stop playback; reading controls stop preview
+  before using the existing sentence controller. Additional synthesis controls use
+  source/voice capabilities. TTS sliders hide tick marks
+  while retaining their discrete steps and current-value labels, without endpoint labels; shared slider
+  and card defaults remain unchanged for Sasayaki.
+  `TtsCatalogLoading` shares the catalog-loading presentation between the Voice tab and
+  picker: e-ink uses localized status text, while other themes use the animated linear bar.
+  Voice names use catalog identifiers unchanged. Online/offline status belongs to the
+  selected voice and its catalog network requirement, not the source. Unknown saved
+  voices keep their raw identifiers without an inferred connection status.
+  `SharedReaderPlaybackSettings` edits the same Sasayaki settings
+  repository from both panels; TTS Settings also exposes its own global Ruby switch above
+  the shared controls. Its dedicated field update preserves other TTS preferences and reports
+  write errors through the Settings error flow without clearing source errors.
+  Reading controls emit field transformations that run against the latest repository state
+  inside its DataStore update; TTS, Sasayaki, Reader appearance and audiobook sync controls
+  do not write old full-setting snapshots. TTS permits only shared reading fields, preserving
+  audiobook preferences and keeping its own synthesis settings. Extra sentence delay is owned by
+  playback, is cancellable and is excluded from preview/Anki audio; provider silence
+  controls are part of synthesized audio. Preview uses the Hoshi playback speed and applies
+  changes without stopping or re-synthesizing; Anki exports retain the engine-produced audio
+  without applying this player speed. TTS navigation remains sentence-based
+  without a timeline or the audiobook skip-action setting.
+  Missing associated files remain Sasayaki recovery cases. The standalone Nav3 TTS
+  Settings route and dictionary remain available regardless of that association.
+  Native text selection exposes Replace, which captures the existing full source
+  sentence into the same TTS replacement editor used by Settings. Its title identifies
+  TTS, scope uses a Material segmented control, and preview uses `HoshiButton`.
+  Reader resolves the full source sentence before mounting the editor, falling back
+  to the captured sentence on failure. The editor waits for its initial background
+  text/validation result before opening the dialog. Recomputations retain the last
+  displayed result, while playback requires a snapshot matching the current draft.
+  Both creation entry points default to global scope; editing retains the saved scope.
+- Root Reader lookup popups retain their source chapter and expose independent TTS
+  visibility/playback state and typed bridge commands. The shared three-button toolbar
+  routes to the active source: TTS replay stops after one sentence, toggle can cancel
+  lookup auto-resume, and play-forward closes the popup. Dictionary child popups have
+  no book source anchor and do not expose TTS controls. Audiobook controls remain unchanged.
+- Anki `{sentence-audio}` has its own mining context field and selected-format media
+  preparation. Associated audiobooks require an existing cue; otherwise TTS synthesizes
+  the full source sentence. Missing audiobook cues never trigger TTS. Existing
+  `{sasayaki-audio}` remains audiobook-only. Shared audiobook paths upload once, and
+  a failed requested sentence upload prevents silently creating a card without audio.
