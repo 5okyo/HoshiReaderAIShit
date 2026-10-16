@@ -4,7 +4,8 @@ import android.content.ContextWrapper
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -13,6 +14,8 @@ import kotlinx.coroutines.test.setMain
 import java.nio.file.Files
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import moe.antimony.hoshi.dictionary.DictionaryCategory
 import moe.antimony.hoshi.ui.UiText
@@ -23,6 +26,40 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AnkiRepositoryBackendSelectionTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test(timeout = 10_000)
+    fun popupExclusionsRefreshAfterCategoryChangesAndSettingsReload() = runBlocking {
+        Dispatchers.setMain(Dispatchers.Unconfined)
+        val changes = MutableStateFlow(0L)
+        val settings = InMemoryAnkiSettingsRepository()
+        var dictionaries = listOf(
+            AnkiTermDictionary("Excluded [2026]", DictionaryCategory.Exclude),
+            AnkiTermDictionary("Included", DictionaryCategory.Monolingual),
+        )
+        val viewModel = AnkiViewModel(repository(
+            settingsRepository = settings,
+            loadTermDictionaries = { dictionaries },
+            dictionaryChangeVersions = changes,
+        ))
+        try {
+            val initial = viewModel.uiState.first { it.excludedDictionaries == listOf("Excluded [2026]") }
+            assertEquals(listOf("Excluded [2026]"), initial.popupSettings.excludedDictionaries)
+
+            dictionaries = listOf(AnkiTermDictionary("Included", DictionaryCategory.Exclude))
+            changes.value = 1L
+            val changed = viewModel.uiState.first { it.excludedDictionaries == listOf("Included") }
+            assertEquals(listOf("Included"), changed.popupSettings.excludedDictionaries)
+
+            dictionaries = emptyList()
+            settings.update { it.copy(selectedGlossaryFallback = "{glossary-first}") }
+            val reloaded = viewModel.uiState.first { it.excludedDictionaries.isEmpty() }
+            assertEquals(emptyList<String>(), reloaded.popupSettings.excludedDictionaries)
+        } finally {
+            viewModel.viewModelScope.coroutineContext[Job]!!.cancelAndJoin()
+            Dispatchers.resetMain()
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
     @Test
     fun addingAFormatDefaultsToHoshiWithoutChangingExistingTags() = runTest {
@@ -37,7 +74,7 @@ class AnkiRepositoryBackendSelectionTest {
             runCurrent()
             assertEquals(listOf("", "hoshi"), settings.current.cardFormats.map { it.tags })
         } finally {
-            viewModel.viewModelScope.cancel()
+            viewModel.viewModelScope.coroutineContext[Job]!!.cancelAndJoin()
             Dispatchers.resetMain()
         }
     }
@@ -889,6 +926,7 @@ class AnkiRepositoryBackendSelectionTest {
         settingsRepository: InMemoryAnkiSettingsRepository = InMemoryAnkiSettingsRepository(),
         ankiConnectBackendFactory: (String, String) -> AnkiBackend = { _, _ -> RecordingBackend() },
         loadTermDictionaries: () -> List<AnkiTermDictionary> = { emptyList() },
+        dictionaryChangeVersions: Flow<Long> = flowOf(0L),
     ): AnkiRepository {
         val cacheDir = Files.createTempDirectory("hoshi-anki-cache").toFile()
         return AnkiRepository(
@@ -900,6 +938,7 @@ class AnkiRepositoryBackendSelectionTest {
             localAudioRepository = LocalAudioRepository(Files.createTempDirectory("hoshi-anki-test").toFile()),
             ankiConnectBackendFactory = ankiConnectBackendFactory,
             loadTermDictionaries = loadTermDictionaries,
+            dictionaryChangeVersions = dictionaryChangeVersions,
         )
     }
 

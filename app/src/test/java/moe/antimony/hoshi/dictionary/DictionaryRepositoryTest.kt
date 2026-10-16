@@ -51,7 +51,7 @@ class DictionaryRepositoryTest {
 
         repository.setDictionaryCategory("First", DictionaryCategory.Exclude)
 
-        assertEquals(emptyList<String>(), bridge.termPaths.toList())
+        assertEquals(listOf(filesDir.resolve("Dictionaries/Term/First").absolutePath), bridge.termPaths.toList())
         assertEquals(DictionaryCategory.Exclude, repository.loadDictionaries(DictionaryType.Term).first { it.path.name == "First" }.category)
 
         repository.deleteDictionary(DictionaryType.Frequency, "Freq")
@@ -61,7 +61,7 @@ class DictionaryRepositoryTest {
     }
 
     @Test
-    fun failedCategoryRebuildRollsBackPersistedCategoryAndKeepsCurrentLookupSession() {
+    fun categoryChangesPersistWithoutRebuildingTheLookupSession() {
         val filesDir = temporaryFolder.newFolder("category-rollback-files")
         val storage = DictionaryStorageDataSource(filesDir)
         val bridge = RecordingDictionaryNativeBridge()
@@ -74,20 +74,42 @@ class DictionaryRepositoryTest {
         writeDictionary(storage.typeDirectory(DictionaryType.Term), "First", "First")
         storage.saveConfigFromStorage()
         repository.rebuildLookupQuery()
-        bridge.failNextRebuild = true
-
-        assertThrows(IllegalStateException::class.java) {
-            repository.setDictionaryCategory("First", DictionaryCategory.Exclude)
-        }
+        val rebuildCount = bridge.rebuildCount
+        repository.setDictionaryCategory("First", DictionaryCategory.Exclude)
 
         assertEquals(
-            DictionaryCategory.None,
+            DictionaryCategory.Exclude,
             repository.loadDictionaries(DictionaryType.Term).single().category,
         )
+        assertEquals(rebuildCount, bridge.rebuildCount)
         assertEquals(
             listOf(filesDir.resolve("Dictionaries/Term/First").absolutePath),
             bridge.termPaths.toList(),
         )
+    }
+
+    @Test
+    fun excludedDictionariesRemainInLookupAfterRestartUntilExplicitlyDisabled() {
+        val filesDir = temporaryFolder.newFolder("excluded-files")
+        val profiles = ProfileRepository(filesDir)
+        val storage = DictionaryStorageDataSource(filesDir, profileRepository = profiles)
+        writeDictionary(storage.typeDirectory(DictionaryType.Term), "Excluded", "Excluded")
+        storage.saveConfig(storage.configWithDictionaryCategory("Excluded", DictionaryCategory.Exclude))
+        val bridge = RecordingDictionaryNativeBridge()
+        val repository = DictionaryRepository(
+            filesDir,
+            storage,
+            DictionaryImportDataSource(bridge),
+            DictionaryLookupQueryService(bridge),
+            profileRepository = profiles,
+        )
+
+        repository.ensureLookupQueryReady()
+
+        assertEquals(listOf(filesDir.resolve("Dictionaries/Term/Excluded").absolutePath), bridge.termPaths.toList())
+        repository.setDictionaryEnabled(DictionaryType.Term, "Excluded", enabled = false)
+        assertEquals(emptyList<String>(), bridge.termPaths.toList())
+        assertEquals(DictionaryCategory.Exclude, repository.loadDictionaries(DictionaryType.Term).single().category)
     }
 
     @Test

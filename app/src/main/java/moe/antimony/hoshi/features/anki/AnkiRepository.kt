@@ -8,10 +8,12 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.dictionary.DictionaryRepository
+import moe.antimony.hoshi.dictionary.DictionaryCategory
 import moe.antimony.hoshi.dictionary.DictionaryType
 import moe.antimony.hoshi.features.audio.LocalAudioFile
 import moe.antimony.hoshi.features.audio.LocalAudioRepository
 import moe.antimony.hoshi.features.audio.LocalAudioResolver
+import moe.antimony.hoshi.features.dictionary.DictionaryMutationCoordinator
 import moe.antimony.hoshi.ui.UiText
 import java.io.File
 import java.net.URL
@@ -19,7 +21,12 @@ import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 @Singleton
@@ -31,6 +38,7 @@ internal class AnkiRepository(
     private val ankiConnectBackendFactory: (String, String) -> AnkiBackend,
     private val loadDictionaryMedia: (DictionaryMedia) -> ByteArray?,
     private val loadTermDictionaries: () -> List<AnkiTermDictionary>,
+    dictionaryChangeVersions: Flow<Long> = flowOf(0L),
 ) {
     @Inject
     constructor(
@@ -39,6 +47,7 @@ internal class AnkiRepository(
         settingsRepository: AnkiSettingsRepository,
         localAudioRepository: LocalAudioRepository,
         dictionaryRepository: DictionaryRepository,
+        dictionaryMutationCoordinator: DictionaryMutationCoordinator,
     ) : this(
         context = context,
         backend = backend,
@@ -56,6 +65,7 @@ internal class AnkiRepository(
                 )
             }
         },
+        dictionaryChangeVersions = dictionaryMutationCoordinator.state.map { it.completedChangeVersion }.distinctUntilChanged(),
     )
 
     internal constructor(
@@ -67,6 +77,7 @@ internal class AnkiRepository(
             AnkiConnectBackend(endpoint, apiKey = apiKey)
         },
         loadTermDictionaries: () -> List<AnkiTermDictionary> = { emptyList() },
+        dictionaryChangeVersions: Flow<Long> = flowOf(0L),
     ) : this(
         context = context,
         backend = backend,
@@ -75,9 +86,14 @@ internal class AnkiRepository(
         ankiConnectBackendFactory = ankiConnectBackendFactory,
         loadDictionaryMedia = { null },
         loadTermDictionaries = loadTermDictionaries,
+        dictionaryChangeVersions = dictionaryChangeVersions,
     )
 
     val settings: Flow<AnkiSettings> = settingsRepository.settings
+
+    val excludedDictionaries: Flow<List<String>> = combine(settings, dictionaryChangeVersions) { _, _ ->
+        loadTermDictionaries().filter { it.category == DictionaryCategory.Exclude }.map { it.name }
+    }.flowOn(Dispatchers.IO).distinctUntilChanged()
 
     suspend fun updateSettings(transform: (AnkiSettings) -> AnkiSettings) {
         settingsRepository.update(transform)

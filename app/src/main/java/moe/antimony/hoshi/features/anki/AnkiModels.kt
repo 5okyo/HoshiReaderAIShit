@@ -232,6 +232,7 @@ data class AnkiPopupSettings(
     val allowDupes: Boolean = false,
     val compactGlossaries: Boolean = false,
     val disableShowNotes: Boolean = false,
+    val excludedDictionaries: List<String> = emptyList(),
 )
 
 internal fun Map<String, String>.referencesAnkiHandlebar(handlebar: String): Boolean =
@@ -498,8 +499,7 @@ internal object AnkiHandlebarRenderer {
         selectedGlossaryFallback: String,
         termDictionaries: List<AnkiTermDictionary>,
     ): String {
-        val selected = singleGlossaryForDictionary(selectedDictionary)
-        if (selected.isNotBlank()) return selected
+        singleGlossaryForDictionaryOrNull(selectedDictionary)?.let { return it }
         if (selectedGlossaryFallback in SelectedGlossaryHandlebars) return ""
         return handlebarToValue(
             handlebar = selectedGlossaryFallback,

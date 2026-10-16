@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.ui.UiText
@@ -24,6 +25,7 @@ data class AnkiUiState(
     val ankiConnectMessage: UiText? = null,
     val errorMessage: UiText? = null,
     val errorAction: AnkiErrorAction? = null,
+    val excludedDictionaries: List<String> = emptyList(),
 ) {
     val availableDecks: List<AnkiDeck>
         get() = decks.ifEmpty { settings.availableDecks }
@@ -98,6 +100,7 @@ data class AnkiUiState(
                 allowDupes = settings.allowDupes,
                 compactGlossaries = settings.compactGlossaries,
                 disableShowNotes = settings.disableShowNotes,
+                excludedDictionaries = excludedDictionaries,
             )
         }
 }
@@ -134,6 +137,11 @@ internal class AnkiViewModel @Inject constructor(
     private var ankiConnectIdentity: Pair<String, String>? = null
 
     init {
+        viewModelScope.launch {
+            repository.excludedDictionaries.collect { dictionaries ->
+                _uiState.update { it.copy(excludedDictionaries = dictionaries) }
+            }
+        }
         viewModelScope.launch {
             repository.settings.collectLatest { settings ->
                 val nextIdentity = settings.ankiConnectUrl to settings.ankiConnectApiKey

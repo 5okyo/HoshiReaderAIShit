@@ -219,6 +219,7 @@ internal object LookupPopupHtml {
                     window.allowDupes = ${ankiSettings.allowDupes};
                     window.useAnkiConnect = ${ankiSettings.useAnkiConnect};
                     window.compactGlossariesAnki = ${ankiSettings.compactGlossaries};
+                    window.excludedDictionaries = ${dictionaryNamesJson(ankiSettings.excludedDictionaries.toSet())};
                     window.ankiFormats = ${ankiFormatsJson(ankiSettings)};
                     window.ankiBackendAvailable = ${ankiSettings.isBackendAvailable};
                     window.disableShowNotes = ${ankiSettings.disableShowNotes};

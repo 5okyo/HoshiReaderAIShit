@@ -312,6 +312,42 @@ function popupContext({
     };
 }
 
+test('Anki aggregate glossary excludes categorized dictionaries while explicit glossaries retain them', () => {
+    const { context } = popupContext();
+    // Render plain glossary text with a minimal DOM; exercise both real glossary builders.
+    context.document.createElement = () => ({
+        children: [],
+        hasAttribute: () => false,
+        setAttribute() {},
+        appendChild(child) { this.children.push(child); },
+        get innerHTML() { return this.children.map(child => child.textContent).join(''); },
+    });
+    context.window.lookupEntries = [{ glossaries: [
+        { dictionary: 'Excluded [2026]', content: 'hidden from aggregate', definitionTags: 'n' },
+        { dictionary: 'Included', content: 'included definition', definitionTags: 'n' },
+    ] }];
+    context.window.excludedDictionaries = ['Excluded [2026]'];
+    context.window.dictionaryStyles = {
+        'Excluded [2026]': '.excluded { color: red; }',
+        Included: '.included { color: blue; }',
+    };
+
+    const aggregate = context.constructGlossaryHtml(0);
+    assert.doesNotMatch(aggregate, /Excluded|hidden from aggregate|\.excluded/);
+    assert.match(aggregate, /\(1, n, Included\)/);
+    assert.match(aggregate, /included definition/);
+    assert.match(aggregate, /\.included/);
+    const single = context.constructSingleGlossaryHtml(0);
+    assert.match(single['Excluded [2026]'], /hidden from aggregate/);
+    assert.match(single.Included, /included definition/);
+
+    context.window.excludedDictionaries = ['Excluded [2026]', 'Included'];
+    assert.doesNotMatch(context.constructGlossaryHtml(0), /<li|<style>/);
+    context.window.excludedDictionaries = [];
+    assert.match(context.constructGlossaryHtml(0), /hidden from aggregate/);
+    assert.equal(context.window.lookupEntries[0].glossaries.length, 2);
+});
+
 test('source text renders code points and redirects exact suffix with matched highlight and scroll preservation', async () => {
     const requests = [];
     const entry = { expression: '𠮟る', reading: 'しかる', matched: '𠮟る', glossaries: [], frequencies: [], pitches: [] };

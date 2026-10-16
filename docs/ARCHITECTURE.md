@@ -155,8 +155,9 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   language and enabled Term/Frequency/Pitch/Kanji paths before swapping it into
   service; term lookup, Kanji query, style, and dictionary-media reads use the
   currently published session and return empty results when no session is
-  ready. Enabled term dictionaries categorized as `exclude` remain stored and
-  manageable but are omitted from the replacement session.
+  ready. Term-dictionary categories do not affect lookup-session membership:
+  all enabled dictionaries remain searchable, including `exclude`. Changing
+  a category persists the config without rebuilding the native session.
 - Dictionary imports preserve typed native failures through the repository;
   batch results pair each failed file with a `UiText` reason. Error-dialog text
   resolves joined resource fragments in the UI locale, retaining native details
@@ -503,7 +504,10 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   duplicate scope. At mining time,
   glossary-first and monolingual/bilingual definition handlebars resolve from
   the current profile's persisted term-dictionary order and categories without
-  extending the popup mining payload.
+  extending the popup mining payload. Anki popup settings carry the profile's
+  excluded dictionary titles and refresh after dictionary mutations and profile
+  settings reloads. Aggregate `{glossary}` output omits excluded dictionaries;
+  explicit single-dictionary and selected-glossary mappings retain them.
 - Google Drive sync uses Android/Google OAuth and Drive APIs through the
   repository/sync boundary. The Drive data source owns paginated folder listing,
   grouped sync-file discovery, bookdata upload/download, trash, cache clearing,

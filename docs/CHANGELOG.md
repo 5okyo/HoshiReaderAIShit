@@ -140,6 +140,11 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Fixed
 
+- Keep dictionaries marked `Exclude` in Anki Advanced available for lookup;
+  omit them from aggregate and first-definition fields while preserving explicit
+  single-dictionary and selected-definition mappings.
+- Apply the selected-glossary fallback only when the selected dictionary has no
+  glossary, preserving empty glossary values.
 - Keep the audio-source menu beside its speaker button and fully inside lookup
   popups when popup scale is above 1, including narrow popups.
 - Restore the text-selection menu after handle drags in paginated paragraphs,

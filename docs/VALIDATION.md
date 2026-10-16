@@ -59,6 +59,11 @@ MockWebServer WebSocket fixtures must reply to peer closure in `onClosing` with
 for the close handshake and fail the test during teardown. Do not suppress shutdown
 exceptions or treat a successful rerun as a fix.
 
+JVM tests that replace `Dispatchers.Main` must cancel and join the ViewModel
+scope's `Job` before calling `Dispatchers.resetMain()`. Calling `cancel()` alone
+can leave IO-flow completion callbacks targeting the removed main dispatcher,
+causing uncaught exceptions in a later, unrelated test.
+
 For localization changes, run:
 
 ```bash
@@ -826,6 +831,14 @@ Validate relevant dictionary/audio changes with:
   graph single/multiple/deduplicated output and
   `{pitch-accent-graphs-first}`. Popup pitch text includes 1-based nasal/devoice
   markers; exported Anki pitch SVGs follow iOS and do not encode those markers.
+- Set an enabled term dictionary to `Exclude` in Anki Advanced. Reader,
+  Dictionary tab, Process Text and child lookups must still show its definitions.
+  Mine `{glossary}` and its brief/no-dictionary variants: they must omit that
+  dictionary, as must `{glossary-first}` and category fallback mappings. Explicit
+  `{single-glossary-Dictionary}` and manually selected `{selected-glossary}`
+  mappings, including their variants, must still export it. Repeat with all
+  dictionaries excluded, after changing categories, after restart and after
+  switching profiles. Only disabling a dictionary removes it from lookup.
 - Anki Advanced keeps `{selected-glossary} Fallback` visible as a literal
   handlebar label, accepts both custom text and every preset fallback option,
   and separates general settings, fallback editing, and the grouped term
