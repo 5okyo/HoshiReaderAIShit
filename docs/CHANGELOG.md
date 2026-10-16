@@ -142,6 +142,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Fixed
 
+- Show saved settings before their controls appear, preventing switches and
+  selections from briefly showing defaults when opening settings pages or panels.
 - Keep dictionaries marked `Exclude` in Anki Advanced available for lookup;
   omit them from aggregate and first-definition fields while preserving explicit
   single-dictionary and selected-definition mappings.

@@ -39,7 +39,8 @@ import kotlinx.coroutines.flow.first
 import moe.antimony.hoshi.LocalHoshiUiDependencies
 import moe.antimony.hoshi.epub.BookEntry
 import moe.antimony.hoshi.epub.BookMetadata
-import moe.antimony.hoshi.features.settings.collectAsLoadedSettings
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.collectAsSettingsLoadState
 import moe.antimony.hoshi.features.sync.SyncDirection
 import moe.antimony.hoshi.features.sync.SyncResult
 import moe.antimony.hoshi.features.wallpaper.BookCoverWallpaperViewModel
@@ -62,8 +63,10 @@ internal fun ReaderRouteDestination(
     val bookCoverPublishFailedMessage = stringResource(R.string.book_cover_wallpaper_publish_failed)
     val iReaderNotSelectedMessage =
         stringResource(R.string.book_cover_wallpaper_ireader_not_selected_error)
-    val syncSettings = appContainer.syncSettingsRepository.settings.collectAsLoadedSettings()
-    val sasayakiSettings = appContainer.sasayakiSettingsRepository.settings.collectAsLoadedSettings()
+    val syncSettings = (appContainer.syncSettingsRepository.settings.collectAsSettingsLoadState()
+        as? SettingsLoadState.Loaded)?.value
+    val sasayakiSettings = (appContainer.sasayakiSettingsRepository.settings.collectAsSettingsLoadState()
+        as? SettingsLoadState.Loaded)?.value
     val autoSyncState = ReaderRouteAutoSyncState(
         syncSettings = syncSettings,
         sasayakiSettings = sasayakiSettings,

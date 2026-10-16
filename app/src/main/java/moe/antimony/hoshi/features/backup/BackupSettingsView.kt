@@ -44,7 +44,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import moe.antimony.hoshi.LocalHoshiUiDependencies
 import moe.antimony.hoshi.R
-import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
+import moe.antimony.hoshi.features.settings.StaticSettingsDetailScaffold
 import moe.antimony.hoshi.importing.FileImportContent
 import moe.antimony.hoshi.importing.ImportFileType
 import moe.antimony.hoshi.importing.UnsupportedImportFileTypeException
@@ -192,7 +192,7 @@ fun BackupSettingsView(
         }
     }
 
-    SettingsDetailScaffold(
+    StaticSettingsDetailScaffold(
         title = stringResource(R.string.settings_backup),
         onClose = {
             if (operation == null) {

@@ -5,16 +5,26 @@ import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import moe.antimony.hoshi.R
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.map
+import moe.antimony.hoshi.features.settings.settingsLoadStates
 import moe.antimony.hoshi.ui.UiText
 
 data class AnkiUiState(
+    val profileId: String? = null,
+    val settingsLoadState: SettingsLoadState<AnkiSettings> = SettingsLoadState.Loading,
     val settings: AnkiSettings = AnkiSettings(),
     val decks: List<AnkiDeck> = emptyList(),
     val noteTypes: List<AnkiNoteType> = emptyList(),
@@ -27,6 +37,9 @@ data class AnkiUiState(
     val errorAction: AnkiErrorAction? = null,
     val excludedDictionaries: List<String> = emptyList(),
 ) {
+    internal val settingsPageState: SettingsLoadState<AnkiUiState>
+        get() = settingsLoadState.map { this }
+
     val availableDecks: List<AnkiDeck>
         get() = decks.ifEmpty { settings.availableDecks }
 
@@ -136,42 +149,84 @@ internal class AnkiViewModel @Inject constructor(
     val uiState: StateFlow<AnkiUiState> = _uiState.asStateFlow()
     private var attemptedAnkiConnectPing = false
     private var ankiConnectIdentity: Pair<String, String>? = null
+    private val settingsRetry = MutableStateFlow(0)
+    private var activeProfileId: String? = null
+    private var configurationJob: Job? = null
+    private var connectionJob: Job? = null
+    private var exclusionsJob: Job? = null
 
     init {
         viewModelScope.launch {
-            repository.excludedDictionaries.collect { dictionaries ->
-                _uiState.update { it.copy(excludedDictionaries = dictionaries) }
-            }
-        }
-        viewModelScope.launch {
-            repository.settings.collectLatest { settings ->
-                val nextIdentity = settings.ankiConnectUrl to settings.ankiConnectApiKey
-                if (settings.backendKind == AnkiBackendKind.AnkiConnect && ankiConnectIdentity != nextIdentity) {
-                    ankiConnectIdentity = nextIdentity
+            combine(repository.profileIds, settingsRetry) { profileId, _ -> profileId }.onEach { profileId ->
+                if (activeProfileId != profileId) {
+                    configurationJob?.cancel()
+                    connectionJob?.cancel()
+                    activeProfileId = profileId
                     attemptedAnkiConnectPing = false
-                    _uiState.value = _uiState.value.copy(isAnkiConnectReachable = false)
-                } else if (settings.backendKind == AnkiBackendKind.AnkiDroid) {
                     ankiConnectIdentity = null
-                    attemptedAnkiConnectPing = false
-                    _uiState.value = _uiState.value.copy(isAnkiConnectReachable = false)
+                    _uiState.value = AnkiUiState(
+                        profileId = profileId,
+                        isAnkiDroidAvailable = repository.isAnkiDroidAvailable(),
+                    )
+                } else {
+                    _uiState.update { it.copy(settingsLoadState = SettingsLoadState.Loading) }
                 }
-                _uiState.value = _uiState.value.copy(settings = settings)
-                if (
-                    !attemptedAnkiConnectPing &&
-                    settings.backendKind == AnkiBackendKind.AnkiConnect &&
-                    settings.ankiConnectUrl.isNotBlank()
-                ) {
-                    attemptedAnkiConnectPing = true
-                    pingAnkiConnect()
+                exclusionsJob?.cancel()
+                exclusionsJob = viewModelScope.launch {
+                    repository.excludedDictionaries.catch { error ->
+                        if (error is CancellationException) throw error
+                    }.collect { dictionaries ->
+                        if (activeProfileId == profileId) {
+                            _uiState.update { it.copy(excludedDictionaries = dictionaries) }
+                        }
+                    }
+                }
+            }.collectLatest { profileId ->
+                repository.settings.settingsLoadStates().collectLatest settings@ { loadState ->
+                    if (activeProfileId != profileId) return@settings
+                    val settings = (loadState as? SettingsLoadState.Loaded)?.value
+                    if (settings == null) {
+                        _uiState.update { it.copy(settingsLoadState = loadState) }
+                        return@settings
+                    }
+                    val nextIdentity = settings.ankiConnectUrl to settings.ankiConnectApiKey
+                    if (settings.backendKind == AnkiBackendKind.AnkiConnect && ankiConnectIdentity != nextIdentity) {
+                        ankiConnectIdentity = nextIdentity
+                        attemptedAnkiConnectPing = false
+                        connectionJob?.cancel()
+                        _uiState.value = _uiState.value.copy(isAnkiConnectReachable = false, isConnectingAnkiConnect = false)
+                    } else if (settings.backendKind == AnkiBackendKind.AnkiDroid) {
+                        ankiConnectIdentity = null
+                        attemptedAnkiConnectPing = false
+                        connectionJob?.cancel()
+                        _uiState.value = _uiState.value.copy(isAnkiConnectReachable = false, isConnectingAnkiConnect = false)
+                    }
+                    _uiState.update { it.copy(settings = settings, settingsLoadState = loadState) }
+                    if (
+                        !attemptedAnkiConnectPing &&
+                        settings.backendKind == AnkiBackendKind.AnkiConnect &&
+                        settings.ankiConnectUrl.isNotBlank()
+                    ) {
+                        attemptedAnkiConnectPing = true
+                        pingAnkiConnect()
+                    }
                 }
             }
         }
     }
 
+    fun retrySettings() {
+        settingsRetry.update { it + 1 }
+    }
+
     fun fetchConfiguration() {
-        viewModelScope.launch {
+        val profileId = activeProfileId
+        configurationJob?.cancel()
+        configurationJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isFetching = true, errorMessage = null, errorAction = null)
-            when (val result = repository.fetchConfiguration()) {
+            val result = repository.fetchConfiguration()
+            if (activeProfileId != profileId) return@launch
+            when (result) {
                 is AnkiFetchResult.Success -> _uiState.value = _uiState.value.copy(
                     decks = result.decks,
                     noteTypes = result.noteTypes,
@@ -353,12 +408,16 @@ internal class AnkiViewModel @Inject constructor(
     }
 
     fun pingAnkiConnect() {
-        viewModelScope.launch {
+        val profileId = activeProfileId
+        connectionJob?.cancel()
+        connectionJob = viewModelScope.launch {
             _uiState.value = _uiState.value.copy(
                 isConnectingAnkiConnect = true,
                 ankiConnectMessage = null,
             )
-            when (val result = repository.pingAnkiConnect()) {
+            val result = repository.pingAnkiConnect()
+            if (activeProfileId != profileId) return@launch
+            when (result) {
                 AnkiConnectConnectionResult.Connected -> _uiState.value = _uiState.value.copy(
                     isConnectingAnkiConnect = false,
                     isAnkiConnectReachable = true,

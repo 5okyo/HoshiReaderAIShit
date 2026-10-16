@@ -15,6 +15,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,6 +36,9 @@ import moe.antimony.hoshi.dictionary.DictionaryUpdateSummary
 import moe.antimony.hoshi.dictionary.RecommendedDictionary
 import moe.antimony.hoshi.di.IoDispatcher
 import moe.antimony.hoshi.features.reader.KanjiStrokeOrderFontInstaller
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.settingsLoadStates
+import moe.antimony.hoshi.profiles.ProfileRepository
 import moe.antimony.hoshi.ui.UiText
 
 internal interface DictionaryViewModelRepository {
@@ -52,6 +61,7 @@ internal interface DictionaryViewModelRepository {
     suspend fun moveDictionary(type: DictionaryType, fromIndex: Int, toIndex: Int): Boolean
     suspend fun rebuildLookupQuery()
     val settings: Flow<DictionarySettings>
+    val profileIds: Flow<String> get() = flowOf("default")
     val mutationState: StateFlow<DictionaryMutationState>
     suspend fun updateSettings(transform: (DictionarySettings) -> DictionarySettings)
 }
@@ -74,9 +84,11 @@ internal class AndroidDictionaryViewModelRepository @Inject constructor(
     private val dictionaryUpdateService: DictionaryUpdateService,
     private val mutationCoordinator: DictionaryMutationCoordinator,
     private val strokeOrderFontInstaller: KanjiStrokeOrderFontInstaller,
+    profileRepository: ProfileRepository,
 ) : DictionaryViewModelRepository {
     override val settings: Flow<DictionarySettings> = settingsRepository.settings
     override val mutationState: StateFlow<DictionaryMutationState> = mutationCoordinator.state
+    override val profileIds: Flow<String> = profileRepository.state.map { it.effectiveProfile.id }.distinctUntilChanged()
 
     override suspend fun loadDictionaries(): Map<DictionaryType, List<DictionaryInfo>> =
         DictionaryType.entries.associateWith { type ->
@@ -188,6 +200,9 @@ internal class DictionaryViewModel : ViewModel {
     private val categoryQueueLock = Any()
     private val pendingCategoryChanges = linkedMapOf<String, DictionaryCategory>()
     private var categoryWorkerRunning = false
+    private val settingsRetry = MutableStateFlow(0)
+    private var activeProfileId: String? = null
+    private var profileGeneration = 0L
     private val scope: CoroutineScope
         get() = injectedScope ?: viewModelScope
 
@@ -233,10 +248,36 @@ internal class DictionaryViewModel : ViewModel {
 
     private fun collectSettings() {
         scope.launch {
-            repository.settings.collect { settings ->
-                _uiState.update { it.copy(settings = settings) }
+            combine(repository.profileIds, settingsRetry) { profileId, _ -> profileId }.onEach { profileId ->
+                val changedProfile = activeProfileId != null && activeProfileId != profileId
+                activeProfileId = profileId
+                if (changedProfile) profileGeneration++
+                _uiState.update {
+                    it.copy(
+                        profileId = profileId,
+                        settingsLoadState = SettingsLoadState.Loading,
+                        dictionariesLoadState = if (changedProfile) SettingsLoadState.Loading else it.dictionariesLoadState,
+                        dictionaries = if (changedProfile) emptyMap() else it.dictionaries,
+                    )
+                }
+                if (changedProfile) reload()
+            }.collectLatest { profileId ->
+                repository.settings.settingsLoadStates().collect { loadState ->
+                    if (activeProfileId != profileId) return@collect
+                    _uiState.update {
+                        it.copy(
+                            settingsLoadState = loadState,
+                            settings = (loadState as? SettingsLoadState.Loaded)?.value ?: it.settings,
+                        )
+                    }
+                }
             }
         }
+    }
+
+    fun retrySettings() {
+        settingsRetry.update { it + 1 }
+        if (_uiState.value.dictionariesLoadState is SettingsLoadState.Failed) reload()
     }
 
     private fun collectMutationState() {
@@ -267,7 +308,28 @@ internal class DictionaryViewModel : ViewModel {
 
     fun reload() {
         scope.launch {
-            reloadDictionaries(clearError = true)
+            val generation = profileGeneration
+            if (_uiState.value.dictionariesLoadState !is SettingsLoadState.Loaded) {
+                _uiState.update { it.copy(dictionariesLoadState = SettingsLoadState.Loading) }
+            }
+            try {
+                reloadDictionaries(clearError = true)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                if (generation != profileGeneration) return@launch
+                _uiState.update {
+                    val message = UiText.Resource(R.string.settings_load_failed)
+                    it.copy(
+                        dictionariesLoadState = if (it.dictionariesLoadState is SettingsLoadState.Loaded) {
+                            it.dictionariesLoadState
+                        } else {
+                            SettingsLoadState.Failed(message)
+                        },
+                        errorMessage = if (it.dictionariesLoadState is SettingsLoadState.Loaded) message else it.errorMessage,
+                    )
+                }
+            }
         }
     }
 
@@ -529,6 +591,7 @@ internal class DictionaryViewModel : ViewModel {
     }
 
     private suspend fun reloadDictionaryLists(clearError: Boolean) {
+        val generation = profileGeneration
         val (dictionaries, updatableDictionaries, strokeOrderFontInstalled) = withContext(ioDispatcher) {
             Triple(
                 repository.loadDictionaries(),
@@ -536,8 +599,10 @@ internal class DictionaryViewModel : ViewModel {
                 repository.isStrokeOrderFontInstalled(),
             )
         }
+        if (generation != profileGeneration) return
         _uiState.update { state ->
             state.copy(
+                dictionariesLoadState = SettingsLoadState.Loaded(dictionaries),
                 dictionaries = dictionaries,
                 updatableDictionaries = updatableDictionaries,
                 strokeOrderFontInstalled = strokeOrderFontInstalled,

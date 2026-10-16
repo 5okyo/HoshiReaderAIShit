@@ -51,8 +51,7 @@ import moe.antimony.hoshi.BuildConfig
 import moe.antimony.hoshi.LocalHoshiUiDependencies
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
-import moe.antimony.hoshi.features.settings.SettingsLoadState
-import moe.antimony.hoshi.features.settings.collectAsSettingsLoadState
+import moe.antimony.hoshi.features.settings.rememberSettingsLoader
 import moe.antimony.hoshi.features.storage.StorageCleanupCategoryId
 import moe.antimony.hoshi.features.storage.StorageCleanupReport
 import java.io.File
@@ -69,9 +68,7 @@ fun AboutScreen(
     val resources = LocalResources.current
     val appContainer = LocalHoshiUiDependencies.current
     val scope = rememberCoroutineScope()
-    val recordLoadState = appContainer.updateDownloadStore.record.collectAsSettingsLoadState()
-    val record = (recordLoadState as? SettingsLoadState.Loaded)?.value
-    val actionableRecord = record?.takeIf { it.shouldSurfaceInAbout(BuildConfig.VERSION_NAME) }
+    val recordLoader = appContainer.updateDownloadStore.record.rememberSettingsLoader()
     var checkState by remember { mutableStateOf<AboutUpdateCheckState>(AboutUpdateCheckState.Idle) }
     var cleanupState by remember { mutableStateOf<StorageCleanupUiState>(StorageCleanupUiState.Idle) }
     var pendingCleanupConfirmation by remember { mutableStateOf<StorageCleanupReport?>(null) }
@@ -167,11 +164,13 @@ fun AboutScreen(
     }
 
     SettingsDetailScaffold(
+        state = recordLoader.state,
         title = stringResource(R.string.settings_about),
         onClose = onClose,
         modifier = modifier,
-    ) { innerPadding ->
-        if (recordLoadState !is SettingsLoadState.Loaded) return@SettingsDetailScaffold
+        onRetry = recordLoader.retry,
+    ) { innerPadding, record ->
+        val actionableRecord = record?.takeIf { it.shouldSurfaceInAbout(BuildConfig.VERSION_NAME) }
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()

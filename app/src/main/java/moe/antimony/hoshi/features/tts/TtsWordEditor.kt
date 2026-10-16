@@ -23,6 +23,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import moe.antimony.hoshi.R
+import moe.antimony.hoshi.features.settings.SettingsContent
+import moe.antimony.hoshi.features.settings.SettingsLoadState
 import moe.antimony.hoshi.content.ContentLanguageProfile
 import moe.antimony.hoshi.ui.HoshiAlertDialog
 import moe.antimony.hoshi.ui.HoshiButton
@@ -32,13 +34,28 @@ import moe.antimony.hoshi.ui.theme.hoshiSurfaces
 
 @Composable
 fun TtsWordEditor(viewModel: TtsViewModel, initial: TtsWord, bookId: String?, sentence: TtsSentence?, onDismiss: () -> Unit) {
-    val preferences by viewModel.preferences.collectAsStateWithLifecycle()
+    val preferencesState by viewModel.preferencesLoadState.collectAsStateWithLifecycle()
     val busy by viewModel.busy.collectAsStateWithLifecycle()
     val previewError by viewModel.error.collectAsStateWithLifecycle()
     DisposableEffect(Unit) { onDispose { viewModel.stopPreview() } }
-    TtsWordEditorDialog(initial, bookId, sentence, preferences, busy, previewError,
-        onPreview = { preview -> viewModel.preview(preview.sentence, bookId, snapshot = preview.preferences) },
-        onSave = viewModel::save, onDelete = viewModel::delete, onDismiss = onDismiss)
+    if (preferencesState !is SettingsLoadState.Loaded) {
+        HoshiAlertDialog(
+            onDismissRequest = onDismiss,
+            title = { Text(stringResource(R.string.tts_replacement_title)) },
+            text = {
+                SettingsContent(preferencesState, onRetry = viewModel::retryPreferences) {}
+            },
+            confirmButton = {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
+            },
+        )
+        return
+    }
+    SettingsContent(preferencesState, onRetry = viewModel::retryPreferences) { preferences ->
+        TtsWordEditorDialog(initial, bookId, sentence, preferences, busy, previewError,
+            onPreview = { preview -> viewModel.preview(preview.sentence, bookId, snapshot = preview.preferences) },
+            onSave = viewModel::save, onDelete = viewModel::delete, onDismiss = onDismiss)
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

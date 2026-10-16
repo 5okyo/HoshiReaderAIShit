@@ -16,6 +16,8 @@ import moe.antimony.hoshi.features.sasayaki.SasayakiSettingsUpdate
 import moe.antimony.hoshi.features.sasayaki.SasayakiSettingsRepository
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.settingsLoadStates
 
 enum class TtsPreviewState { Idle, Preparing, Playing }
 
@@ -34,10 +36,13 @@ class TtsViewModel @Inject constructor(
     private val mutableError = MutableStateFlow<TtsFailure?>(null)
     private val mutableReadingError = MutableStateFlow<TtsFailure?>(null)
     val readingError = mutableReadingError.asStateFlow()
-    val readingSettings = readingSettingsRepository.settings
-        .map<SasayakiSettings, SasayakiSettings?> { it }
-        .catch { mutableReadingError.value = TtsFailure.Storage; emit(null) }
+    private val readingLoadAttempt = MutableStateFlow(0)
+    val readingSettingsLoadState = readingLoadAttempt.flatMapLatest {
+        readingSettingsRepository.settings.settingsLoadStates()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsLoadState.Loading)
+    val readingSettings = readingSettingsLoadState.map { (it as? SettingsLoadState.Loaded)?.value }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    fun retryReadingSettings() { readingLoadAttempt.update { it + 1 } }
 
     fun readingSettings(update: SasayakiSettingsUpdate) {
         viewModelScope.launch {
@@ -56,7 +61,13 @@ class TtsViewModel @Inject constructor(
         }
     }
 
-    val preferences = repository.preferences.catch { mutableError.value = TtsFailure.Storage; emit(TtsPreferences()) }.stateIn(viewModelScope, SharingStarted.Eagerly, TtsPreferences())
+    private val preferencesLoadAttempt = MutableStateFlow(0)
+    val preferencesLoadState = preferencesLoadAttempt.flatMapLatest {
+        repository.preferences.settingsLoadStates()
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, SettingsLoadState.Loading)
+    val preferences = preferencesLoadState.map { (it as? SettingsLoadState.Loaded)?.value }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    fun retryPreferences() { preferencesLoadAttempt.update { it + 1 } }
     private val mutableCatalog = MutableStateFlow<TtsCatalog?>(null)
     val catalog = mutableCatalog.asStateFlow()
     private val mutableEngines = MutableStateFlow<List<TtsEngineInfo>>(emptyList())
@@ -67,7 +78,7 @@ class TtsViewModel @Inject constructor(
     private val mutablePreviewState = MutableStateFlow(TtsPreviewState.Idle)
     val previewState = mutablePreviewState.asStateFlow()
     val busy = combine(catalogBusy, mutablePreviewState, preferences) { catalog, preview, current ->
-        (catalog && current.settings.customSource()?.protocol != TtsCustomProtocol.OpenAi) || preview == TtsPreviewState.Preparing
+        (catalog && current?.settings?.customSource()?.protocol != TtsCustomProtocol.OpenAi) || preview == TtsPreviewState.Preparing
     }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private var catalogGeneration = 0L

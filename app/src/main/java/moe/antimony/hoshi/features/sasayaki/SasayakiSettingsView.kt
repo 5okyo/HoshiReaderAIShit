@@ -2,8 +2,6 @@ package moe.antimony.hoshi.features.sasayaki
 
 import moe.antimony.hoshi.ui.theme.hoshiSurfaces
 import moe.antimony.hoshi.ui.theme.hoshiContainerBorder
-import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,25 +10,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material3.CenterAlignedTopAppBar
 import moe.antimony.hoshi.ui.HoshiDropdownMenu as DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,7 +38,10 @@ import moe.antimony.hoshi.LocalHoshiUiDependencies
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.features.reader.ReaderColorPickerDialog
 import moe.antimony.hoshi.features.reader.ReaderColorSettingRow
-import moe.antimony.hoshi.features.settings.collectAsLoadedSettings
+import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.rememberSettingsLoader
+import kotlinx.coroutines.flow.combine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,8 +52,12 @@ fun SasayakiSettingsView(
     val appContainer = LocalHoshiUiDependencies.current
     val scope = rememberCoroutineScope()
     val repository = appContainer.sasayakiSettingsRepository
-    val syncSettings = appContainer.syncSettingsRepository.settings.collectAsLoadedSettings()
-    val settings = repository.settings.collectAsLoadedSettings()
+    val syncRepository = appContainer.syncSettingsRepository
+    val settingsFlow = remember(repository, syncRepository) {
+        combine(repository.settings, syncRepository.settings) { settings, sync -> settings to sync }
+    }
+    val settingsLoader = settingsFlow.rememberSettingsLoader()
+    val settings = (settingsLoader.state as? SettingsLoadState.Loaded)?.value?.first
     var skipActionMenuExpanded by remember { mutableStateOf(false) }
     var colorDialogRow by remember { mutableStateOf<SasayakiColorRow?>(null) }
 
@@ -69,26 +67,14 @@ fun SasayakiSettingsView(
         }
     }
 
-    BackHandler(onBack = onClose)
     val colorScheme = MaterialTheme.colorScheme
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = hoshiSurfaces.page,
-        topBar = {
-            CenterAlignedTopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = hoshiSurfaces.page,
-                    scrolledContainerColor = hoshiSurfaces.page,
-                ),
-                title = { Text(stringResource(R.string.sasayaki_title), fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
+    SettingsDetailScaffold(
+        state = settingsLoader.state,
+        title = stringResource(R.string.sasayaki_title),
+        onClose = onClose,
+        onRetry = settingsLoader.retry,
+        modifier = modifier,
+    ) { innerPadding, (loadedSettings, loadedSyncSettings) ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -97,8 +83,6 @@ fun SasayakiSettingsView(
             verticalArrangement = Arrangement.spacedBy(18.dp),
         ) {
             item {
-                val loadedSettings = settings ?: return@item
-                val loadedSyncSettings = syncSettings ?: return@item
                 SettingsCard {
                     ListItem(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),

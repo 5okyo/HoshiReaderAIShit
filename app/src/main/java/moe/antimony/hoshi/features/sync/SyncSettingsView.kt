@@ -7,9 +7,7 @@ import android.content.Context
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
-import androidx.activity.compose.BackHandler
 import androidx.annotation.StringRes
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -22,11 +20,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.ContentCopy
 import moe.antimony.hoshi.ui.HoshiAlertDialog as AlertDialog
 import moe.antimony.hoshi.ui.HoshiButton as Button
-import androidx.compose.material3.CenterAlignedTopAppBar
 import moe.antimony.hoshi.ui.HoshiDropdownMenu as DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,12 +35,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedSecureTextField
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -74,7 +68,11 @@ import moe.antimony.hoshi.LocalHoshiUiDependencies
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.features.reader.ReaderSettings
 import moe.antimony.hoshi.features.sasayaki.SasayakiSettings
-import moe.antimony.hoshi.features.settings.collectAsLoadedSettings
+import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.rememberSettingsLoader
+import moe.antimony.hoshi.ui.UiText
+import kotlinx.coroutines.flow.combine
 import moe.antimony.hoshi.ui.hoshiOutlinedTextFieldColors
 import moe.antimony.hoshi.ui.hoshiSingleLineTextFieldLineLimits
 import moe.antimony.hoshi.ui.rememberSyncedTextFieldState
@@ -93,9 +91,18 @@ fun SyncSettingsView(
     val sasayakiSettingsRepository = appContainer.sasayakiSettingsRepository
     val authorizer = appContainer.deviceCodeDriveAuthorizer
     val scope = rememberCoroutineScope()
-    val settings = repository.settings.collectAsLoadedSettings()
-    val readerSettings = readerSettingsRepository.settings.collectAsLoadedSettings()
-    val sasayakiSettings = sasayakiSettingsRepository.settings.collectAsLoadedSettings()
+    val settingsFlow = remember(repository, readerSettingsRepository, sasayakiSettingsRepository) {
+        combine(repository.settings, readerSettingsRepository.settings, sasayakiSettingsRepository.settings) { sync, reader, sasayaki ->
+            Triple(sync, reader, sasayaki)
+        }
+    }
+    val settingsLoader = settingsFlow.rememberSettingsLoader()
+    val confirmed = (settingsLoader.state as? SettingsLoadState.Loaded)?.value
+    val settings = confirmed?.first
+    val readerSettings = confirmed?.second
+    val sasayakiSettings = confirmed?.third
+    var authLoadError by remember { mutableStateOf<UiText?>(null) }
+    var authAttempt by remember { mutableStateOf(0) }
     var authStatus by remember { mutableStateOf<DriveAuthStatus?>(null) }
     var directionMenuExpanded by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf<String?>(null) }
@@ -132,12 +139,19 @@ fun SyncSettingsView(
         }
     }
 
-    LaunchedEffect(authorizer) {
-        authorizer.configuredClient()?.let { client ->
-            clientId = client.clientId
-            clientSecret = client.clientSecret
+    LaunchedEffect(authorizer, authAttempt) {
+        authLoadError = null
+        try {
+            authorizer.configuredClient()?.let { client ->
+                clientId = client.clientId
+                clientSecret = client.clientSecret
+            }
+            authStatus = authorizer.status()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            authLoadError = UiText.Resource(R.string.settings_load_failed)
         }
-        authStatus = authorizer.status()
     }
 
     LaunchedEffect(devicePrompt, isAuthorizing) {
@@ -251,7 +265,6 @@ fun SyncSettingsView(
         }
     }
 
-    BackHandler(onBack = onClose)
     if (showSignOutConfirmation) {
         AlertDialog(
             onDismissRequest = { showSignOutConfirmation = false },
@@ -297,24 +310,20 @@ fun SyncSettingsView(
         )
     }
     val colorScheme = MaterialTheme.colorScheme
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        containerColor = hoshiSurfaces.page,
-        topBar = {
-            CenterAlignedTopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = hoshiSurfaces.page,
-                    scrolledContainerColor = hoshiSurfaces.page,
-                ),
-                title = { Text(stringResource(R.string.sync_title), fontWeight = FontWeight.SemiBold) },
-                navigationIcon = {
-                    IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, contentDescription = stringResource(R.string.action_back))
-                    }
-                },
-            )
-        },
-    ) { innerPadding ->
+    val screenLoadState: SettingsLoadState<Triple<SyncSettings, ReaderSettings, SasayakiSettings>> = when {
+        settingsLoader.state is SettingsLoadState.Failed -> settingsLoader.state
+        authLoadError != null -> SettingsLoadState.Failed(requireNotNull(authLoadError))
+        authStatus == null -> SettingsLoadState.Loading
+        else -> settingsLoader.state
+    }
+    SettingsDetailScaffold(
+        state = screenLoadState,
+        title = stringResource(R.string.sync_title),
+        onClose = onClose,
+        onRetry = { settingsLoader.retry(); authAttempt++ },
+        modifier = modifier,
+    ) { innerPadding, (currentSettings, currentReaderSettings, currentSasayakiSettings) ->
+        val currentAuthStatus = requireNotNull(authStatus)
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -324,15 +333,6 @@ fun SyncSettingsView(
             contentPadding = PaddingValues(bottom = 24.dp),
         ) {
             item {
-                if (
-                    !screenState.isContentReady ||
-                    currentSettings == null ||
-                    currentReaderSettings == null ||
-                    currentSasayakiSettings == null ||
-                    currentAuthStatus == null
-                ) {
-                    return@item
-                }
                 Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
                     SettingsCard {
                         ListItem(
@@ -426,9 +426,6 @@ fun SyncSettingsView(
                 }
             }
             item {
-                if (!screenState.isContentReady || currentAuthStatus == null) {
-                    return@item
-                }
                 SettingsCard {
                     ListItem(
                         colors = ListItemDefaults.colors(containerColor = Color.Transparent),

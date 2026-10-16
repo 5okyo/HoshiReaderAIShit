@@ -53,6 +53,8 @@ import moe.antimony.hoshi.features.reader.ReaderBehaviorScreen
 import moe.antimony.hoshi.features.reader.ReaderFontManager
 import moe.antimony.hoshi.features.reader.ReaderSettings
 import moe.antimony.hoshi.features.profiles.ProfilesView
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.rememberSettingsLoader
 import moe.antimony.hoshi.features.sasayaki.SasayakiSettings
 import moe.antimony.hoshi.features.settings.AdvancedSettingsView
 import moe.antimony.hoshi.features.statistics.StatisticsView
@@ -81,6 +83,8 @@ fun AppShell(
     pendingDictionaryLookupRequest: PendingDictionaryLookupRequest? = null,
     onPendingDictionaryLookupConsumed: () -> Unit = {},
     readerSettings: ReaderSettings,
+    readerSettingsLoadState: SettingsLoadState<ReaderSettings>,
+    onRetryReaderSettings: () -> Unit,
     onReaderSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     onReaderKeyEventHandlerChange: (((KeyEvent) -> Boolean)?) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -106,6 +110,8 @@ fun AppShell(
     val sasayakiSettingsRepository = appContainer.sasayakiSettingsRepository
     val scope = rememberCoroutineScope()
     val currentReaderSettings by rememberUpdatedState(readerSettings)
+    val currentReaderSettingsLoadState by rememberUpdatedState(readerSettingsLoadState)
+    val currentOnRetryReaderSettings by rememberUpdatedState(onRetryReaderSettings)
     val currentOnPendingImportConsumed by rememberUpdatedState(onPendingImportConsumed)
     val currentOnPendingSasayakiReaderConsumed by rememberUpdatedState(onPendingSasayakiReaderConsumed)
     val currentOnPendingDictionaryLookupConsumed by rememberUpdatedState(onPendingDictionaryLookupConsumed)
@@ -117,17 +123,11 @@ fun AppShell(
     val readerBookmarkRefreshState = remember { ReaderBookmarkRefreshState() }
     var bookshelfRefreshKey by remember { mutableIntStateOf(0) }
     var dictionaryFocusRequestKey by rememberSaveable { mutableIntStateOf(0) }
-    var sasayakiSettings by remember { mutableStateOf(SasayakiSettings()) }
+    val sasayakiSettingsLoader = sasayakiSettingsRepository.settings.rememberSettingsLoader()
+    val currentSasayakiSettingsLoader by rememberUpdatedState(sasayakiSettingsLoader)
     val visibleMainTabs = MainTab.entries
 
-    LaunchedEffect(sasayakiSettingsRepository) {
-        sasayakiSettingsRepository.settings.collect { settings ->
-            sasayakiSettings = settings
-        }
-    }
-
     fun updateSasayakiSettings(update: (SasayakiSettings) -> SasayakiSettings) {
-        sasayakiSettings = update(sasayakiSettings)
         scope.launch {
             sasayakiSettingsRepository.update(update)
         }
@@ -330,9 +330,11 @@ fun AppShell(
                 is AppRoute.SettingsDetailRoute -> SettingsDetailDestination(
                     route = route,
                     effectiveProfileName = profileState.effectiveProfile.name,
-                    readerSettings = currentReaderSettings,
+                    readerSettings = currentReaderSettingsLoadState,
+                    onRetryReaderSettings = currentOnRetryReaderSettings,
                     onReaderSettingsChange = currentOnReaderSettingsChange,
-                    sasayakiSettings = sasayakiSettings,
+                    sasayakiSettings = currentSasayakiSettingsLoader.state,
+                    onRetrySasayakiSettings = currentSasayakiSettingsLoader.retry,
                     onSasayakiSettingsChange = ::updateSasayakiSettings,
                     readerFontManager = readerFontManager,
                     onClose = ::popRoute,
@@ -511,9 +513,11 @@ private fun TopLevelRouteContent(
 private fun SettingsDetailDestination(
     route: AppRoute.SettingsDetailRoute,
     effectiveProfileName: String,
-    readerSettings: ReaderSettings,
+    readerSettings: SettingsLoadState<ReaderSettings>,
+    onRetryReaderSettings: () -> Unit,
     onReaderSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
-    sasayakiSettings: SasayakiSettings,
+    sasayakiSettings: SettingsLoadState<SasayakiSettings>,
+    onRetrySasayakiSettings: () -> Unit,
     onSasayakiSettingsChange: ((SasayakiSettings) -> SasayakiSettings) -> Unit,
     readerFontManager: ReaderFontManager,
     onClose: () -> Unit,
@@ -544,9 +548,11 @@ private fun SettingsDetailDestination(
         )
         SettingsDetailSection.Appearance -> ReaderAppearanceScreen(
             settings = readerSettings,
+            onRetrySettings = onRetryReaderSettings,
             profileName = effectiveProfileName,
             onSettingsChange = onReaderSettingsChange,
             sasayakiSettings = sasayakiSettings,
+            onRetrySasayakiSettings = onRetrySasayakiSettings,
             onSasayakiSettingsChange = onSasayakiSettingsChange,
             fontManager = readerFontManager,
             onClose = onClose,
@@ -554,14 +560,13 @@ private fun SettingsDetailDestination(
         )
         SettingsDetailSection.Behavior -> ReaderBehaviorScreen(
             settings = readerSettings,
+            onRetrySettings = onRetryReaderSettings,
             onSettingsChange = onReaderSettingsChange,
             onClose = onClose,
             modifier = Modifier.fillMaxSize(),
         )
         SettingsDetailSection.Advanced -> AdvancedSettingsView(
             onOpenTts = onOpenTts,
-            readerSettings = readerSettings,
-            onReaderSettingsChange = onReaderSettingsChange,
             onClose = onClose,
             onBooksRestored = onBooksRestored,
             modifier = Modifier.fillMaxSize(),

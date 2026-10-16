@@ -3,7 +3,16 @@ package moe.antimony.hoshi.features.dictionary
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import moe.antimony.hoshi.features.settings.SettingsLoadState
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.dictionary.DictionaryIndex
 import moe.antimony.hoshi.dictionary.DictionaryInfo
@@ -23,8 +32,153 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
+import java.io.IOException
 
 class DictionaryViewModelTest {
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun settingsWaitForTheFirstStoredValueAndKeepFollowingUpdates() = runTest {
+        val firstRead = CompletableDeferred<Unit>()
+        val stored = MutableStateFlow(DictionarySettings(dictionaryTabDefault = true, showExpressionTags = true))
+        val repository = FakeDictionaryRepository(settingsSource = flow {
+            firstRead.await()
+            emitAll(stored)
+        })
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val viewModel = DictionaryViewModel(repository, backgroundScope, dispatcher)
+
+        viewModel.reload()
+        runCurrent()
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsLoadState)
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsPageState)
+        firstRead.complete(Unit)
+        runCurrent()
+
+        val firstVisible = viewModel.uiState.value.settingsLoadState as SettingsLoadState.Loaded
+        assertTrue((viewModel.uiState.value.settingsPageState as SettingsLoadState.Loaded).value.settings.dictionaryTabDefault)
+        assertTrue(firstVisible.value.dictionaryTabDefault)
+        assertTrue(firstVisible.value.showExpressionTags)
+        stored.value = stored.value.copy(showExpressionTags = false)
+        runCurrent()
+        val updated = viewModel.uiState.value.settingsLoadState as SettingsLoadState.Loaded
+        assertFalse(updated.value.showExpressionTags)
+        assertTrue(updated.value.dictionaryTabDefault)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun failedSettingsReadsExposeRetryAndWaitForTheNewStoredValue() = runTest {
+        var failRead = true
+        val retryRead = CompletableDeferred<Unit>()
+        val repository = FakeDictionaryRepository(settingsSource = flow {
+            if (failRead) throw IOException("unreadable")
+            retryRead.await()
+            emit(DictionarySettings(dictionaryTabDefault = true))
+        })
+        val viewModel = DictionaryViewModel(repository, backgroundScope, StandardTestDispatcher(testScheduler))
+        runCurrent()
+        assertTrue(viewModel.uiState.value.settingsLoadState is SettingsLoadState.Failed)
+        failRead = false
+        viewModel.retrySettings()
+        runCurrent()
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsLoadState)
+        retryRead.complete(Unit)
+        runCurrent()
+        assertTrue((viewModel.uiState.value.settingsLoadState as SettingsLoadState.Loaded).value.dictionaryTabDefault)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun profileChangesWaitForNewSettingsAndIgnorePreviousProfileUpdates() = runTest {
+        val profileIds = MutableStateFlow("first")
+        val first = MutableStateFlow(DictionarySettings(dictionaryTabDefault = true))
+        val secondRead = CompletableDeferred<Unit>()
+        val repository = FakeDictionaryRepository(profileIds = profileIds, settingsSource = flow {
+            if (profileIds.value == "first") emitAll(first) else {
+                secondRead.await()
+                emit(DictionarySettings(showExpressionTags = true))
+            }
+        })
+        val viewModel = DictionaryViewModel(repository, backgroundScope, StandardTestDispatcher(testScheduler))
+        runCurrent()
+        assertTrue((viewModel.uiState.value.settingsLoadState as SettingsLoadState.Loaded).value.dictionaryTabDefault)
+        profileIds.value = "second"
+        runCurrent()
+        assertEquals("second", viewModel.uiState.value.profileId)
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsLoadState)
+        first.value = first.value.copy(dictionaryTabDefault = false)
+        runCurrent()
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsLoadState)
+        secondRead.complete(Unit)
+        runCurrent()
+        assertTrue((viewModel.uiState.value.settingsLoadState as SettingsLoadState.Loaded).value.showExpressionTags)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun reopeningSettingsWaitsForItsReadAndDoesNotReusePreviousValues() = runTest {
+        val firstRepository = FakeDictionaryRepository(settings = DictionarySettings(dictionaryTabDefault = true))
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val first = DictionaryViewModel(firstRepository, backgroundScope, dispatcher)
+        runCurrent()
+        assertTrue((first.uiState.value.settingsLoadState as SettingsLoadState.Loaded).value.dictionaryTabDefault)
+        val nextRead = CompletableDeferred<Unit>()
+        val nextRepository = FakeDictionaryRepository(settingsSource = flow {
+            nextRead.await()
+            emit(DictionarySettings(showExpressionTags = true))
+        })
+        val next = DictionaryViewModel(nextRepository, backgroundScope, dispatcher)
+        runCurrent()
+        assertEquals(SettingsLoadState.Loading, next.uiState.value.settingsLoadState)
+        nextRead.complete(Unit)
+        runCurrent()
+        assertTrue((next.uiState.value.settingsLoadState as SettingsLoadState.Loaded).value.showExpressionTags)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun dictionaryDependentControlsWaitForTheInitialListAndRemainVisibleDuringRefresh() = runTest {
+        val read = CompletableDeferred<Unit>()
+        val repository = FakeDictionaryRepository(settings = DictionarySettings(dictionaryTabDefault = true))
+        repository.onLoadDictionaries = { read.await() }
+        val viewModel = DictionaryViewModel(repository, backgroundScope, StandardTestDispatcher(testScheduler))
+        viewModel.reload()
+        runCurrent()
+        assertTrue(viewModel.uiState.value.settingsLoadState is SettingsLoadState.Loaded)
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsPageState)
+        read.complete(Unit)
+        runCurrent()
+        assertTrue((viewModel.uiState.value.settingsPageState as SettingsLoadState.Loaded).value.settings.dictionaryTabDefault)
+
+        val refresh = CompletableDeferred<Unit>()
+        repository.onLoadDictionaries = { refresh.await() }
+        viewModel.reload()
+        runCurrent()
+        assertTrue((viewModel.uiState.value.settingsPageState as SettingsLoadState.Loaded).value.settings.dictionaryTabDefault)
+        refresh.complete(Unit)
+        runCurrent()
+        assertTrue(viewModel.uiState.value.settingsPageState is SettingsLoadState.Loaded)
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun aFailedInitialDictionaryListCanBeRetried() = runTest {
+        val repository = FakeDictionaryRepository()
+        repository.onLoadDictionaries = { throw IOException("unreadable") }
+        val viewModel = DictionaryViewModel(repository, backgroundScope, StandardTestDispatcher(testScheduler))
+        viewModel.reload()
+        runCurrent()
+        assertTrue(viewModel.uiState.value.settingsPageState is SettingsLoadState.Failed)
+        val retryRead = CompletableDeferred<Unit>()
+        repository.onLoadDictionaries = { retryRead.await() }
+        viewModel.retrySettings()
+        runCurrent()
+        assertEquals(SettingsLoadState.Loading, viewModel.uiState.value.settingsPageState)
+        retryRead.complete(Unit)
+        runCurrent()
+        assertTrue(viewModel.uiState.value.settingsPageState is SettingsLoadState.Loaded)
+    }
+
     @Test
     fun cancelledImportClearsLoadingWithoutShowingAnError() {
         val viewModel = DictionaryViewModel(repository = FakeDictionaryRepository(), coroutineScope = testScope, ioDispatcher = Dispatchers.Unconfined)
@@ -779,13 +933,16 @@ private class FakeDictionaryRepository(
     var updatableDictionaries: List<DictionaryUpdateCandidate> = emptyList(),
     private val failedImportItems: Set<DictionaryImportItem> = emptySet(),
     var strokeOrderFontInstalled: Boolean = false,
+    settingsSource: Flow<DictionarySettings>? = null,
+    override val profileIds: Flow<String> = flowOf("default"),
 ) : DictionaryViewModelRepository {
     private val settingsFlow = MutableStateFlow(settings)
-    override val settings: StateFlow<DictionarySettings> = settingsFlow
+    override val settings: Flow<DictionarySettings> = settingsSource ?: settingsFlow
     private val mutationStateFlow = MutableStateFlow(DictionaryMutationState())
     override val mutationState: StateFlow<DictionaryMutationState> = mutationStateFlow
     var rebuildCount = 0
     var loadDictionariesCount = 0
+    var onLoadDictionaries: (suspend () -> Unit)? = null
     var onImport: (() -> Unit)? = null
     var onMove: (suspend () -> Unit)? = null
     var onCategory: (suspend (DictionaryCategory) -> Boolean)? = null
@@ -803,6 +960,7 @@ private class FakeDictionaryRepository(
 
     override suspend fun loadDictionaries(): Map<DictionaryType, List<DictionaryInfo>> {
         loadDictionariesCount += 1
+        onLoadDictionaries?.invoke()
         return dictionaries
     }
 

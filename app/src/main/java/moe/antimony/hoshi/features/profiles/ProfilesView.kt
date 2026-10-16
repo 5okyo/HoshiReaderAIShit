@@ -49,6 +49,7 @@ import moe.antimony.hoshi.features.settings.GroupCard
 import moe.antimony.hoshi.features.settings.GroupDivider
 import moe.antimony.hoshi.features.settings.SectionTitle
 import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
+import moe.antimony.hoshi.features.settings.SettingsLoadState
 import moe.antimony.hoshi.profiles.HoshiProfile
 import moe.antimony.hoshi.profiles.ProfileState
 
@@ -87,10 +88,11 @@ private fun ProfilesContent(
     var creatingProfile by remember { mutableStateOf(false) }
 
     SettingsDetailScaffold(
+        state = SettingsLoadState.Loaded(state),
         title = stringResource(R.string.profiles_title),
         onClose = onClose,
         modifier = modifier,
-    ) { contentPadding ->
+    ) { contentPadding, loadedState ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -100,11 +102,11 @@ private fun ProfilesContent(
         ) {
             item {
                 ActiveProfileSection(
-                    state = state,
+                    state = loadedState,
                     onActivateGlobal = onActivateGlobal,
                 )
             }
-            items(state.profileLanguageGroups(), key = { it.language.dictionaryLanguageId }) { group ->
+            items(loadedState.profileLanguageGroups(), key = { it.language.dictionaryLanguageId }) { group ->
                 LanguageProfileSection(
                     group = group,
                     onEdit = { profile -> editingProfile = profile },

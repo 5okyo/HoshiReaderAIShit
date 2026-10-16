@@ -2,6 +2,10 @@ package moe.antimony.hoshi.features.anki
 
 import android.content.ContextWrapper
 import java.nio.file.Files
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -12,6 +16,23 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AnkiRepositoryFetchTest {
+    @Test
+    fun cancellingAProfileFetchBeforePersistenceKeepsTheStoredConfiguration() = runBlocking {
+        val initial = AnkiSettings(cardFormats = listOf(AnkiCardFormat(id = "saved", name = "Saved", selectedDeckName = "Saved deck")))
+        val settingsRepository = InMemoryAnkiSettingsRepository(initial)
+        lateinit var fetch: Job
+        val repository = repository(
+            backend = FakeAnkiBackend(onFetchNoteTypes = { fetch.cancel() }),
+            settingsRepository = settingsRepository,
+        )
+        fetch = launch(Dispatchers.IO, start = CoroutineStart.LAZY) { repository.fetchConfiguration() }
+
+        fetch.start()
+        fetch.join()
+
+        assertEquals(initial, settingsRepository.current)
+    }
+
     @Test
     fun fetchReportsApiUnavailableWithActionableMessage() = runBlocking {
         val repository = repository(backend = FakeAnkiBackend(available = false))
@@ -187,6 +208,7 @@ class AnkiRepositoryFetchTest {
         ),
         private val fetchDecksError: Throwable? = null,
         private val fetchNoteTypesError: Throwable? = null,
+        private val onFetchNoteTypes: () -> Unit = {},
     ) : AnkiBackend {
         override fun isAvailable(): Boolean = available
 
@@ -197,6 +219,7 @@ class AnkiRepositoryFetchTest {
 
         override fun fetchNoteTypes(): List<AnkiNoteType> {
             fetchNoteTypesError?.let { throw it }
+            onFetchNoteTypes()
             return noteTypes
         }
 

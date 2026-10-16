@@ -35,6 +35,8 @@
     <string name="action_copy_code">Copy code</string>
     <string name="action_scan">Scan</string>
     <string name="loading">Loading...</string>
+    <string name="settings_load_failed">Could not load settings. Please try again.</string>
+    <string name="settings_retry" comment="Retry loading persisted settings.">Retry</string>
     <string name="none" comment="Generic empty value label, intentionally matching bookshelf_no_shelf.">None</string>
     <string name="dialog_error_title">Error</string>
     <string name="import_select_epub_book">Select a .epub EPUB book file.</string>

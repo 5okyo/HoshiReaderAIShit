@@ -18,6 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import moe.antimony.hoshi.R
 import moe.antimony.hoshi.epub.EpubBook
 import moe.antimony.hoshi.epub.EpubChapter
@@ -37,11 +39,13 @@ import org.junit.runner.RunWith
 class TtsPanelStateTest {
     @get:Rule val compose = createComposeRule()
     private class MemoryStore(initial: Preferences = emptyPreferences()) : DataStore<Preferences> {
-        override val data = MutableStateFlow(initial)
+        private val stored = MutableStateFlow(initial)
+        var readGate: CompletableDeferred<Unit>? = null
+        override val data = flow { readGate?.await(); emitAll(stored) }
         var failWrites = false
         override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences {
             if (failWrites) throw IOException("Fixture write failure")
-            return transform(data.value).also { data.value = it }
+            return transform(stored.value).also { stored.value = it }
         }
     }
     private val context = ApplicationProvider.getApplicationContext<Context>()
@@ -59,10 +63,11 @@ class TtsPanelStateTest {
     private lateinit var speech: MemoryStore
     private val configMessage get() = context.getString(R.string.tts_configuration_error)
 
-    private fun panel(system: Boolean = false, reader: Boolean = false, online: Boolean = false, discovery: CountDownLatch? = null) {
+    private fun panel(system: Boolean = false, reader: Boolean = false, online: Boolean = false, discovery: CountDownLatch? = null, storageGate: CompletableDeferred<Unit>? = null, editor: Boolean = false) {
         val source = if (discovery != null) "custom:manual" else if (system) androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("ttsEngine").orEmpty() else if (online) TtsOnlineSource.Edge.id else TtsOnlineSource.GoogleCloud.id
         val profiles = if (discovery == null) "" else """, "routingBySource":{"custom:manual":{"narration":"sample"}}, "customSources":[{"id":"custom:manual","name":"Local","baseUrl":"http://127.0.0.1:8088/v1","model":"irodori-tts","voiceIds":["neutral","bright"]}]"""
         speech = MemoryStore(preferencesOf(stringPreferencesKey("preferences") to """{"settings":{"engine":"$source"$profiles}}"""))
+        speech.readGate = storageGate
         val repository = TtsRepository(speech)
         val cipher = TtsCredentialCipher(Dispatchers.IO)
         val transport = OnlineTtsTransport(OkHttpClient.Builder().addInterceptor {
@@ -95,7 +100,13 @@ class TtsPanelStateTest {
                 TtsPlaybackController(books, repository, audio, output, scope), context)
             models.put("fixture", model)
         }
-        compose.setContent { HoshiReaderTheme(darkTheme = false, dynamicColor = false) { if (panelVisible.value) TtsPanel(model, null, if (reader) ({ model.playback.play() }) else null, Modifier) } }
+        compose.setContent { HoshiReaderTheme(darkTheme = false, dynamicColor = false) {
+            if (panelVisible.value) {
+                if (editor) TtsWordEditor(model, TtsWord("fixture", "猫", "ねこ"), null, null, { panelVisible.value = false })
+                else TtsPanel(model, null, if (reader) ({ model.playback.play() }) else null, Modifier)
+            }
+        } }
+        if (storageGate != null) return
         if (discovery != null) {
             compose.waitUntil(5_000) { discoveryStarted.get() }
             return
@@ -105,6 +116,23 @@ class TtsPanelStateTest {
     }
 
     @After fun dispose() { compose.runOnUiThread { models.clear(); scope.cancel() } }
+
+    @Test fun delayedStoredPreferencesDoNotRenderDefaultSettingsControls() {
+        val gate = CompletableDeferred<Unit>()
+        panel(storageGate = gate)
+        compose.runOnIdle { Assert.assertNull(model.preferences.value) }
+        compose.onNodeWithText(context.getString(R.string.tts_tab_voice)).assertDoesNotExist()
+        gate.complete(Unit)
+        compose.waitUntil(5_000) { model.preferences.value?.settings?.engine == TtsOnlineSource.GoogleCloud.id }
+        compose.onAllNodesWithText(context.getString(R.string.tts_tab_voice)).onFirst().assertExists()
+    }
+
+    @Test fun loadingReplacementEditorCanBeDismissedWithoutCreatingSettingsControls() {
+        panel(storageGate = CompletableDeferred(), editor = true)
+        compose.onNodeWithText(context.getString(R.string.tts_regex_enabled)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.action_cancel)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_replacement_title)).assertDoesNotExist()
+    }
 
     @Test fun azureConfigurationRejectsUnknownRegionsAndPersistsTheSelectedRegion() {
         panel()
@@ -154,7 +182,7 @@ class TtsPanelStateTest {
             compose.onNodeWithText("sample").performScrollTo().performClick()
             compose.onNodeWithText(context.getString(R.string.tts_refresh_voices)).assertIsNotEnabled()
             compose.onNodeWithText("neutral").assertIsDisplayed().performClick()
-            compose.waitUntil(5_000) { model.preferences.value.settings.voice == "neutral" }
+            compose.waitUntil(5_000) { model.preferences.value?.settings?.voice == "neutral" }
         } finally { discovery.countDown() }
     }
 
@@ -169,7 +197,7 @@ class TtsPanelStateTest {
         compose.runOnIdle { Assert.assertEquals(TtsFailure.Configuration, model.error.value) }
         compose.runOnIdle { speech.failWrites = false }
         compose.onAllNodes(isToggleable()).onFirst().performClick()
-        compose.waitUntil(5_000) { !model.preferences.value.settings.useRubyReadings && model.readingError.value == null }
+        compose.waitUntil(5_000) { model.preferences.value?.settings?.useRubyReadings == false && model.readingError.value == null }
         compose.onAllNodes(isToggleable()).onFirst().assertIsOff()
     }
 
@@ -179,7 +207,7 @@ class TtsPanelStateTest {
         compose.onNodeWithText("Settings").performClick()
         compose.onNodeWithText("Use Ruby readings").assertIsDisplayed()
         compose.onAllNodes(isToggleable()).onFirst().assertIsOn().performClick()
-        compose.waitUntil(5_000) { !model.preferences.value.settings.useRubyReadings }
+        compose.waitUntil(5_000) { model.preferences.value?.settings?.useRubyReadings == false }
         compose.onAllNodes(isToggleable()).onFirst().assertIsOff()
         compose.onNodeWithText("Replacements").performClick()
         compose.onNodeWithText("Settings").performClick()
@@ -219,7 +247,7 @@ class TtsPanelStateTest {
         compose.onNodeWithText("Model ID").performScrollTo().performTextReplacement("tts")
         compose.onNodeWithText("Available voice IDs").performScrollTo().performTextReplacement("neutral\nbright")
         compose.onNodeWithText("Save").performClick()
-        compose.waitUntil(5_000) { model.preferences.value.settings.engine.startsWith("custom:") && model.catalog.value?.voices?.any { it.id == "neutral" } == true }
+        compose.waitUntil(5_000) { model.preferences.value?.settings?.engine?.startsWith("custom:") == true && model.catalog.value?.voices?.any { it.id == "neutral" } == true }
         compose.onNodeWithText("New local server").assertIsDisplayed()
         compose.runOnIdle { Assert.assertEquals(0, playCount); Assert.assertEquals(TtsPreviewState.Idle, model.previewState.value) }
     }
@@ -241,7 +269,7 @@ class TtsPanelStateTest {
             compose.waitUntil(5_000) { model.catalog.value?.voices?.singleOrNull()?.id == "ja-JP-KeitaNeural" && !model.busy.value }
             refresh.assertIsEnabled()
             compose.onNodeWithText("ja-JP-KeitaNeural").assertIsDisplayed()
-            compose.runOnIdle { Assert.assertEquals(2, onlineRequests); Assert.assertEquals("", model.preferences.value.settings.voice) }
+            compose.runOnIdle { Assert.assertEquals(2, onlineRequests); Assert.assertEquals("", model.preferences.value?.settings?.voice) }
             onlineFailure = true
             refresh.performClick()
             compose.waitUntil(5_000) { model.error.value != null && !model.busy.value }
@@ -252,7 +280,7 @@ class TtsPanelStateTest {
             compose.waitUntil(5_000) { model.error.value == null && !model.busy.value }
             compose.onNodeWithText("ja-JP-KeitaNeural").performClick()
             compose.runOnIdle { model.refresh() }
-            compose.waitUntil(5_000) { model.preferences.value.settings.voice == "ja-JP-KeitaNeural" }
+            compose.waitUntil(5_000) { model.preferences.value?.settings?.voice == "ja-JP-KeitaNeural" }
             compose.runOnIdle { Assert.assertEquals(4, onlineRequests) }
         } finally { gate.countDown(); refreshGate = null }
     }
@@ -276,7 +304,7 @@ class TtsPanelStateTest {
         compose.waitUntil(15_000) { model.previewState.value == TtsPreviewState.Playing || model.error.value != null }
         compose.runOnIdle { Assert.assertNull(model.error.value); Assert.assertEquals(TtsPreviewState.Playing, model.previewState.value) }
         compose.runOnIdle { model.settings { it.copy(playbackRate = 1.5f) } }
-        compose.waitUntil(5_000) { model.preferences.value.settings.playbackRate == 1.5f }
+        compose.waitUntil(5_000) { model.preferences.value?.settings?.playbackRate == 1.5f }
         compose.runOnIdle { Assert.assertEquals(TtsPreviewState.Playing, model.previewState.value) }
         compose.onNodeWithText("Stop preview").performClick()
         compose.runOnIdle { Assert.assertEquals(TtsPreviewState.Idle, model.previewState.value) }

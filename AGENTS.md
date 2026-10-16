@@ -25,6 +25,7 @@ Hoshi Reader Android 是 Hoshi Reader 的 Android/Kotlin/Jetpack Compose 原生�
 - DI：生产依赖图使用 Hilt；新增依赖优先通过构造函数注入，并通过 Hilt module/qualifier 接入；ViewModel 使用 `@HiltViewModel`；不要新增手写 app container 或在 Composable 中扩散对象图创建逻辑。现有 `HoshiUiDependencies` 只是 lazy Compose 过渡桥，不应手动创建对象图。
 - Platform：Android API 按平台语义和官方文档选择，不机械映射 iOS API。
 - Settings：小型设置和偏好使用 DataStore-backed repository，不在 Composable 中直接读写 DataStore。
+- Settings 首帧：读取持久化配置的设置页必须通过 `SettingsDetailScaffold(state = ...)`，sheet/嵌入面板通过 `SettingsContent`，仅在 `SettingsLoadState.Loaded` 后创建设置控件。首发前使用 `Loading`，读取失败显示可重试错误；不得用 `Settings()`、默认 `stateIn` 值或 `Loaded(默认值)` 冒充已加载。多个必需数据源全部就绪后再显示；已由上层确认的实际值可直接包装为 `Loaded`。`StaticSettingsDetailScaffold` 仅用于静态菜单/操作，不得绕过持久化设置的加载入口。新增或修改设置状态源时补延迟首发、失败重试测试；profile 设置还需覆盖切换后旧请求不回写。
 - Background work：需要跨进程、重启或离开可见状态后仍可靠执行的任务使用 WorkManager；worker 依赖通过 Hilt worker injection 接入，不做手写查找。
 - EPUB import：通过 Android Storage Access Framework 导入到 app-specific storage。
 

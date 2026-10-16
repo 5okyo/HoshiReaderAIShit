@@ -35,6 +35,8 @@ import moe.antimony.hoshi.features.reader.ReaderSheetSwitchRow
 import moe.antimony.hoshi.features.reader.ReaderSheetTabs
 import moe.antimony.hoshi.features.reader.readerSheetStyle
 import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.SettingsContent
 import moe.antimony.hoshi.ui.HoshiDropdownMenu as DropdownMenu
 import moe.antimony.hoshi.ui.theme.hoshiSurfaces
 
@@ -53,16 +55,25 @@ fun TtsSheet(
 @Composable
 fun TtsSettingsView(onClose: () -> Unit, modifier: Modifier = Modifier) {
     val viewModel: TtsViewModel = hiltViewModel()
-    SettingsDetailScaffold(title = stringResource(R.string.tts_title), onClose = onClose, modifier = modifier) { padding ->
+    val state by viewModel.preferencesLoadState.collectAsStateWithLifecycle()
+    SettingsDetailScaffold(state = state, title = stringResource(R.string.tts_title), onClose = onClose, onRetry = viewModel::retryPreferences, modifier = modifier) { padding, _ ->
         TtsPanel(viewModel, null, null, Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding))
     }
 }
 
 @Composable
 internal fun TtsPanel(viewModel: TtsViewModel, bookId: String?, onStart: (() -> Unit)?, modifier: Modifier) {
-    val readingSettings by viewModel.readingSettings.collectAsStateWithLifecycle()
+    val state by viewModel.preferencesLoadState.collectAsStateWithLifecycle()
+    SettingsContent(state, modifier, viewModel::retryPreferences) { preferences ->
+        TtsLoadedPanel(viewModel, bookId, onStart, modifier, preferences)
+    }
+}
+
+@Composable
+private fun TtsLoadedPanel(viewModel: TtsViewModel, bookId: String?, onStart: (() -> Unit)?, modifier: Modifier, preferences: TtsPreferences) {
+    val readingSettingsState by viewModel.readingSettingsLoadState.collectAsStateWithLifecycle()
+    val readingSettings = (readingSettingsState as? SettingsLoadState.Loaded)?.value
     var colorRow by remember { mutableStateOf<SasayakiColorRow?>(null) }
-    val preferences by viewModel.preferences.collectAsStateWithLifecycle()
     val catalog by viewModel.catalog.collectAsStateWithLifecycle()
     val engines by viewModel.engines.collectAsStateWithLifecycle()
     val playback by viewModel.playback.state.collectAsStateWithLifecycle()
@@ -101,9 +112,9 @@ internal fun TtsPanel(viewModel: TtsViewModel, bookId: String?, onStart: (() -> 
             Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 28.dp)) {
                 ReaderSheetSwitchRow(stringResource(R.string.tts_use_ruby), preferences.settings.useRubyReadings,
                     onCheckedChange = viewModel::useRubyReadings)
-                readingSettings?.let { settings ->
+                SettingsContent(readingSettingsState, Modifier.fillMaxWidth().padding(20.dp), viewModel::retryReadingSettings) { settings ->
                     SharedReaderPlaybackSettings(settings, viewModel::readingSettings, { colorRow = it })
-                } ?: LinearProgressIndicator(Modifier.fillMaxWidth().padding(20.dp))
+                }
                 readingError?.let { Text(stringResource(it.messageRes()), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(20.dp)) }
             }
         } else {

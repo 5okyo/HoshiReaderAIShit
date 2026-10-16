@@ -1,11 +1,14 @@
 package moe.antimony.hoshi.features.display
 
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.TestScope
+import moe.antimony.hoshi.features.settings.SettingsLoadState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -13,6 +16,96 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DisplaySettingsViewModelTest {
+    @Test
+    fun delayedFirstReadKeepsControlsUnavailableAndRejectsEdits() = runTest {
+        val firstRead = CompletableDeferred<AppDisplaySettings>()
+        var writes = 0
+        val model = DisplaySettingsViewModel(
+            settings = flow { emit(firstRead.await()) },
+            updateSettings = { writes++ },
+            setAutoSwitchValue = { _, _ -> writes++ },
+            selectPresetValue = { _, _ -> writes++ },
+            coroutineScope = backgroundScope,
+        )
+        runCurrent()
+        assertNull(model.uiState.value.settings)
+        model.setEInkMode(true)
+        model.setAutoSwitch(false, false)
+        model.selectPalettePreset(DisplayPaletteSlot.Dark, DisplayPalettePreset.Dark)
+        runCurrent()
+        assertEquals(0, writes)
+
+        val persisted = AppDisplaySettings(autoSwitch = false, eInkMode = true)
+        firstRead.complete(persisted)
+        runCurrent()
+        assertEquals(persisted, model.uiState.value.settings)
+    }
+
+    @Test
+    fun failedReadCanRetryWithoutRevealingLastSettingsAndNewInstanceLoadsAgain() = runTest {
+        val persisted = AppDisplaySettings(autoSwitch = false, eInkDarkTheme = true)
+        val finishFirstRead = CompletableDeferred<Unit>()
+        var attempts = 0
+        val source = flow {
+            attempts++
+            if (attempts == 1) throw IOException()
+            finishFirstRead.await()
+            emit(persisted)
+        }
+        fun newModel() = DisplaySettingsViewModel(source, {}, { _, _ -> }, { _, _ -> }, backgroundScope)
+        val model = newModel()
+        runCurrent()
+        assertEquals(true, model.uiState.value.loadState is SettingsLoadState.Failed)
+        assertNull(model.uiState.value.settings)
+
+        model.retryLoad()
+        assertEquals(SettingsLoadState.Loading, model.uiState.value.loadState)
+        runCurrent()
+        finishFirstRead.complete(Unit)
+        runCurrent()
+        assertEquals(SettingsLoadState.Loaded(persisted), model.uiState.value.loadState)
+
+        val reopened = newModel()
+        assertEquals(SettingsLoadState.Loading, reopened.uiState.value.loadState)
+        runCurrent()
+        assertEquals(SettingsLoadState.Loaded(persisted), reopened.uiState.value.loadState)
+        assertEquals(3, attempts)
+    }
+
+    @Test
+    fun liveReadFailureHidesControlsButPreservesUnsavedPaletteUntilRetrySucceeds() = runTest {
+        val persisted = AppDisplaySettings(autoSwitch = false)
+        val failRead = CompletableDeferred<Unit>()
+        var attempts = 0
+        val model = DisplaySettingsViewModel(
+            settings = flow {
+                attempts++
+                emit(persisted)
+                if (attempts == 1) {
+                    failRead.await()
+                    throw IOException()
+                }
+            },
+            updateSettings = {},
+            setAutoSwitchValue = { _, _ -> },
+            selectPresetValue = { _, _ -> },
+            coroutineScope = backgroundScope,
+        )
+        runCurrent()
+        model.openPaletteEditor(DisplayPaletteSlot.Light)
+        model.updatePaletteDraft(backgroundColor = 0x7F123456L)
+        val draft = model.uiState.value.paletteDraft
+        failRead.complete(Unit)
+        runCurrent()
+        assertEquals(true, model.uiState.value.loadState is SettingsLoadState.Failed)
+        assertNull(model.uiState.value.settings)
+        assertEquals(draft, model.uiState.value.paletteDraft)
+        model.retryLoad()
+        runCurrent()
+        assertEquals(SettingsLoadState.Loaded(persisted), model.uiState.value.loadState)
+        assertEquals(draft, model.uiState.value.paletteDraft)
+    }
+
     @Test
     fun manualCustomSelectionActivatesItsGroupOnlyOnSuccessfulSave() = runTest {
         val stored = MutableStateFlow(AppDisplaySettings(autoSwitch = false))

@@ -52,6 +52,21 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   `StateFlow`.
 - Settings and small persisted preferences are stored behind DataStore-backed
   repositories.
+- Persisted settings controls are composed through the required
+  `SettingsDetailScaffold(state = ...)` entry point, or `SettingsContent` for sheets
+  and embedded panels. `SettingsLoadState` distinguishes `Loading`, `Loaded(value)`
+  and localized `Failed`; a loaded nullable value is a valid result. Repository
+  defaults become ready only after the repository confirms them. Multiple required
+  sources must all emit before controls are created; initial constructor defaults
+  never stand in for stored values. ViewModels own readiness for their screens;
+  direct repository Flow consumers use the shared lifecycle-aware settings loader,
+  whose retry and source identity reset readiness. Ordinary value updates retain
+  the loaded controls. Profile-scoped Anki, Dictionary and reading state cancels and resets
+  on profile changes, rejecting late results from the previous profile.
+  `StaticSettingsDetailScaffold` serves static menus/operations; already-ready
+  parent inputs can use `Loaded(actualValue)`. Navigation3 entry/ViewModel scope
+  remains responsible for navigation lifetime, while readiness controls the first
+  settings frame independently of navigation retention or switch animation.
 - Profiles are Hilt-backed app-wide state. `ProfileRepository` stores profile
   metadata under app-specific files, exposes active profile state through
   `StateFlow`, and controls the effective content language for Reader,
@@ -218,8 +233,14 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   preferences. Both MainActivity and Process Text use `ReaderSettingsHostViewModel`
   and wait for its first confirmed value before rendering content. ViewModels expose
   immutable state and localized load/save errors; profile changes never overwrite
-  global display settings. Reading setting events submit transformations against
+  global display settings. The host retains the last confirmed settings for the app
+  shell during profile reads, while its separate `loadState` blocks settings controls
+  and edits until the new profile is ready; navigation entry stores stay composed.
+  Reading Appearance also waits for confirmed Sasayaki preferences, including its
+  Reader sheet. Reading setting events submit transformations against
   the latest stored value, preserving successive edits during delayed persistence.
+  Each profile reading update captures its target before suspension and uses that
+  profile for the entire read, missing-file initialization and write operation.
   Display updates use the existing WebView appearance
   bridge without rebuilding Reader content or lookup state. Both Activity hosts
   handle `uiMode` changes in place; Compose observes the updated system

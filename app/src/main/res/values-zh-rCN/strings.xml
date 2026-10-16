@@ -35,6 +35,8 @@
     <string name="action_copy_code">复制代码</string>
     <string name="action_scan">扫描</string>
     <string name="loading">正在加载...</string>
+    <string name="settings_load_failed">无法加载设置，请重试。</string>
+    <string name="settings_retry" comment="Retry loading persisted settings.">重试</string>
     <string name="none" comment="Generic empty value label, intentionally matching bookshelf_no_shelf.">无</string>
     <string name="dialog_error_title">错误</string>
     <string name="import_select_epub_book">请选择 .epub EPUB 书籍文件。</string>

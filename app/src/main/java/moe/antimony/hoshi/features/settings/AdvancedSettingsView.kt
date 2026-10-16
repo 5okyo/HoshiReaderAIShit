@@ -36,15 +36,12 @@ import moe.antimony.hoshi.R
 import moe.antimony.hoshi.features.anki.AnkiConnectView
 import moe.antimony.hoshi.features.audio.AudioSettingsView
 import moe.antimony.hoshi.features.backup.BackupSettingsView
-import moe.antimony.hoshi.features.reader.ReaderSettings
 import moe.antimony.hoshi.features.sasayaki.SasayakiSettingsView
 import moe.antimony.hoshi.features.sync.SyncSettingsView
 import moe.antimony.hoshi.features.wallpaper.BookCoverWallpaperSettingsView
 
 @Composable
 fun AdvancedSettingsView(
-    readerSettings: ReaderSettings,
-    onReaderSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     onClose: () -> Unit,
     onBooksRestored: () -> Unit = {},
     onOpenTts: () -> Unit = {},
@@ -96,7 +93,7 @@ fun AdvancedSettingsView(
     }
 
     val colorScheme = MaterialTheme.colorScheme
-    SettingsDetailScaffold(
+    StaticSettingsDetailScaffold(
         title = stringResource(R.string.settings_advanced),
         onClose = onClose,
         modifier = modifier.fillMaxSize(),

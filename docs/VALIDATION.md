@@ -885,6 +885,32 @@ emulator state without clearing data or reimporting.
 
 Validate relevant settings/theme changes with:
 
+- New or changed persisted settings sources must have delayed-first-emission
+  behavior tests: no controls before every required source emits, actual stored
+  values on first composition, localized read failure and retry, and ordinary
+  updates without resetting to defaults. Profile-scoped owners also cover profile
+  changes with delayed old-profile completions. Test flow/state behavior rather
+  than scanning production source. `SettingsReadinessTest` exercises the common
+  Compose entry point, re-entry, source replacement, retry and loaded-null content;
+  `TtsPanelStateTest` also delays the actual panel's preference store. These use
+  in-memory stores and can run with the data-preserving APK install/instrumentation
+  procedure, without resetting the installed app.
+- For profile-owned storage changes, pause reads and saves across dispatcher
+  boundaries, switch profiles, then resume: one operation must keep its original
+  target for reading, missing-file initialization and writing. The newly active
+  profile must not receive the previous profile's settings.
+- Save non-default switches/selections, then enter, leave and re-enter Anki (including
+  format, advanced and connection pages), Dictionary and its editors, Display,
+  Statistics, Reader Appearance/Behavior, Word audio, Sasayaki, TTS, Sync, Wallpaper
+  and About. Inspect the first visible controls: they must already match stored
+  values, with no off-to-on or selection jump caused by loading. Reader sheets
+  follow the same rule. Loading/failure leaves Back available; retry loads real
+  values. Static menus remain immediately usable, and About with no update record
+  shows its empty state rather than waiting indefinitely.
+- Switch between profiles with different Anki, Dictionary and reading settings;
+  no previous-profile values or late request results may become editable in the
+  new profile. Editing an already-loaded value must retain the controls, dialogs
+  and current draft rather than restarting the initial loading screen.
 - Compose scrolling surfaces across Bookshelf, Contents, Statistics, Settings,
   and modal sheets do not stretch or glow past either edge; normal scrolling,
   flinging, pull-to-refresh, and sheet dragging remain available.

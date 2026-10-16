@@ -20,6 +20,7 @@ import java.net.URL
 import java.security.MessageDigest
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.coroutineContext
 
 @Singleton
 internal class AnkiRepository(
@@ -90,6 +92,7 @@ internal class AnkiRepository(
     )
 
     val settings: Flow<AnkiSettings> = settingsRepository.settings
+    val profileIds: Flow<String> = settingsRepository.profileIds
 
     val excludedDictionaries: Flow<List<String>> = combine(settings, dictionaryChangeVersions) { _, _ ->
         loadTermDictionaries().filter { it.category == DictionaryCategory.Exclude }.map { it.name }
@@ -165,6 +168,7 @@ internal class AnkiRepository(
                 },
             )
         }
+        coroutineContext.ensureActive()
         settingsRepository.update { current ->
             val selectedDeck = decks.firstOrNull { !it.name.equals("Default", ignoreCase = true) }
                 ?: decks.first()

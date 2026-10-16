@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import moe.antimony.hoshi.R
+import moe.antimony.hoshi.features.settings.SettingsLoadState
 import moe.antimony.hoshi.ui.UiText
 
 internal data class DisplayPaletteDraft(
@@ -27,12 +28,15 @@ internal data class DisplayAccentDraft(
 )
 
 internal data class DisplaySettingsUiState(
-    val settings: AppDisplaySettings? = null,
+    val loadState: SettingsLoadState<AppDisplaySettings> = SettingsLoadState.Loading,
     val paletteDraft: DisplayPaletteDraft? = null,
     val accentDraft: DisplayAccentDraft? = null,
     val isSaving: Boolean = false,
     val error: UiText? = null,
-)
+) {
+    val settings: AppDisplaySettings?
+        get() = (loadState as? SettingsLoadState.Loaded)?.value
+}
 
 @HiltViewModel
 internal class DisplaySettingsViewModel internal constructor(
@@ -61,16 +65,16 @@ internal class DisplaySettingsViewModel internal constructor(
 
     fun retryLoad() {
         loadJob?.cancel()
-        _uiState.update { it.copy(error = null) }
+        _uiState.update { it.copy(loadState = SettingsLoadState.Loading) }
         loadJob = scope.launch {
             try {
                 settings.collect { confirmed ->
-                    _uiState.update { it.copy(settings = confirmed) }
+                    _uiState.update { it.copy(loadState = SettingsLoadState.Loaded(confirmed)) }
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                _uiState.update { it.copy(error = UiText.Resource(R.string.display_settings_load_failed)) }
+                _uiState.update { it.copy(loadState = SettingsLoadState.Failed(UiText.Resource(R.string.display_settings_load_failed))) }
             }
         }
     }
@@ -191,7 +195,7 @@ internal class DisplaySettingsViewModel internal constructor(
     fun dismissError() = _uiState.update { it.copy(error = null) }
 
     private fun save(onSuccess: () -> Unit = {}, operation: suspend () -> Unit) {
-        if (_uiState.value.isSaving) return
+        if (_uiState.value.isSaving || _uiState.value.loadState !is SettingsLoadState.Loaded) return
         scope.launch {
             _uiState.update { it.copy(isSaving = true, error = null) }
             try {

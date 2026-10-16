@@ -13,6 +13,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import moe.antimony.hoshi.ui.HoshiAlertDialog as AlertDialog
 import androidx.compose.material3.Text
@@ -24,6 +25,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
@@ -57,6 +59,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import moe.antimony.hoshi.LocalHoshiUiDependencies
+import moe.antimony.hoshi.features.settings.SettingsContent
+import moe.antimony.hoshi.features.settings.SettingsLoadState
+import moe.antimony.hoshi.features.settings.settingsLoadStates
 import moe.antimony.hoshi.features.sasayaki.SasayakiSettingsUpdate
 import moe.antimony.hoshi.features.tts.*
 import moe.antimony.hoshi.R
@@ -144,7 +149,11 @@ fun ReaderWebView(
     val sasayakiPlaybackServiceRuntime = appContainer.sasayakiPlaybackServiceRuntime
     val statisticsDateProvider = appContainer.statisticsDateProvider
     val bookRepository = appContainer.bookRepository
-    var sasayakiSettings by remember { mutableStateOf(SasayakiSettings()) }
+    var sasayakiSettingsState by remember(sasayakiSettingsRepository) {
+        mutableStateOf<SettingsLoadState<SasayakiSettings>>(SettingsLoadState.Loading)
+    }
+    var sasayakiLoadAttempt by remember { mutableIntStateOf(0) }
+    var sasayakiSettings by remember(sasayakiSettingsRepository) { mutableStateOf(SasayakiSettings()) }
     var sasayakiMatchData by remember(bookRoot) { mutableStateOf<SasayakiMatchData?>(null) }
     var sasayakiSheetMatchData by remember(bookRoot) { mutableStateOf<SasayakiMatchData?>(null) }
     var isSasayakiMatchLoaded by remember(bookRoot) { mutableStateOf(bookRoot == null) }
@@ -261,9 +270,11 @@ fun ReaderWebView(
             audioSettings = settings
         }
     }
-    LaunchedEffect(sasayakiSettingsRepository) {
-        sasayakiSettingsRepository.settings.collect { settings ->
-            sasayakiSettings = settings
+    LaunchedEffect(sasayakiSettingsRepository, sasayakiLoadAttempt) {
+        sasayakiSettingsState = SettingsLoadState.Loading
+        sasayakiSettingsRepository.settings.settingsLoadStates().collect { state ->
+            sasayakiSettingsState = state
+            if (state is SettingsLoadState.Loaded) sasayakiSettings = state.value
         }
     }
     val effectiveSettings = stateHolder.effectiveSettings
@@ -695,6 +706,7 @@ fun ReaderWebView(
     fun updateSasayakiSettings(update: SasayakiSettingsUpdate) {
         val settings = update(sasayakiSettings)
         sasayakiSettings = settings
+        if (sasayakiSettingsState is SettingsLoadState.Loaded) sasayakiSettingsState = SettingsLoadState.Loaded(settings)
         scope.launch {
             sasayakiSettingsRepository.update(update)
         }
@@ -2111,7 +2123,8 @@ fun ReaderWebView(
                     stateHolder.applySettings(transform(stateHolder.effectiveSettings))
                     onReaderSettingsChange(transform)
                 },
-                sasayakiSettings = sasayakiSettings,
+                sasayakiSettings = sasayakiSettingsState,
+                onRetrySasayakiSettings = { sasayakiLoadAttempt++ },
                 onSasayakiSettingsChange = ::updateSasayakiSettings,
                 fontManager = fontManager,
                 onDismiss = stateHolder::dismissAppearance,
@@ -2191,31 +2204,38 @@ fun ReaderWebView(
             title = { Text(stringResource(R.string.tts_title)) }, text = { Text(stringResource(R.string.tts_failed)) },
             confirmButton = { TextButton(onClick = { ttsMiningError = false }) { Text(stringResource(R.string.action_back)) } })
         if (showSasayaki && sasayakiPlayer != null && sasayakiAudioRepository != null) {
-            SasayakiSheet(
-                player = requireNotNull(sasayakiPlayer),
-                audioRepository = sasayakiAudioRepository,
-                settings = sasayakiSettings,
-                bookTitle = book.title,
-                bookCoverFile = sasayakiCoverFile,
-                audiobookInfo = sasayakiAudiobookInfo,
-                subtitleMatchData = sasayakiSheetMatchData,
-                matchDependencies = bookEntry?.let { entry ->
-                    SasayakiMatchDependencies(
-                        bookEntry = entry,
-                        bookRepository = bookRepository,
-                        epubBookParser = appContainer.epubBookParser,
-                        characterCount = book.bookInfo.characterCount,
-                    )
-                },
-                selectedTab = stateHolder.selectedSasayakiTab,
-                onSelectedTabChange = stateHolder::selectSasayakiTab,
-                onSubtitleMatchUpdated = onSasayakiMatchUpdated,
-                onSettingsChange = ::updateSasayakiSettings,
-                transcriptionState = sasayakiTranscriptionState,
-                transcriptionViewModel = sasayakiTranscriptionViewModel,
-                subtitleExportViewModel = sasayakiSubtitleExportViewModel,
-                onDismiss = stateHolder::dismissSasayaki,
-            )
+            val confirmedSasayakiSettings = (sasayakiSettingsState as? SettingsLoadState.Loaded)?.value
+            if (confirmedSasayakiSettings == null) {
+                ReaderBottomPanel(sheetStyle = readerSheetStyle(), onDismiss = stateHolder::dismissSasayaki) {
+                    SettingsContent(sasayakiSettingsState, Modifier.fillMaxWidth().weight(1f), { sasayakiLoadAttempt++ }) {}
+                }
+            } else {
+                SasayakiSheet(
+                    player = requireNotNull(sasayakiPlayer),
+                    audioRepository = sasayakiAudioRepository,
+                    settings = confirmedSasayakiSettings,
+                    bookTitle = book.title,
+                    bookCoverFile = sasayakiCoverFile,
+                    audiobookInfo = sasayakiAudiobookInfo,
+                    subtitleMatchData = sasayakiSheetMatchData,
+                    matchDependencies = bookEntry?.let { entry ->
+                        SasayakiMatchDependencies(
+                            bookEntry = entry,
+                            bookRepository = bookRepository,
+                            epubBookParser = appContainer.epubBookParser,
+                            characterCount = book.bookInfo.characterCount,
+                        )
+                    },
+                    selectedTab = stateHolder.selectedSasayakiTab,
+                    onSelectedTabChange = stateHolder::selectSasayakiTab,
+                    onSubtitleMatchUpdated = onSasayakiMatchUpdated,
+                    onSettingsChange = ::updateSasayakiSettings,
+                    transcriptionState = sasayakiTranscriptionState,
+                    transcriptionViewModel = sasayakiTranscriptionViewModel,
+                    subtitleExportViewModel = sasayakiSubtitleExportViewModel,
+                    onDismiss = stateHolder::dismissSasayaki,
+                )
+            }
         }
         if (statisticsLoadFailed) {
             AlertDialog(
