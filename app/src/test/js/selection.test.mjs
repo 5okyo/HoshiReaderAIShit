@@ -475,6 +475,13 @@ test('japanese reader selection still honors the non-Japanese scan toggle', () =
     );
 });
 
+test('japanese reader selection scans full names across middle dots', () => {
+    assert.equal(
+        scanTextFromOffset('アーサー・コナン・ドイル。次の文', 0, { language: 'ja' }),
+        'アーサー・コナン・ドイル',
+    );
+});
+
 test('shared selection scans supplementary-plane hits from the full character boundary', () => {
     assert.equal(
         scanTextFromOffset('𠮟り付けてはみても、不安', 1, { language: 'ja' }),

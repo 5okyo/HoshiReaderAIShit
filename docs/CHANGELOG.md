@@ -144,6 +144,7 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Fixed
 
+- Keep Japanese names containing middle dots intact when scanning text for lookup.
 - Clear the Dictionary tab's search when opening a book, preventing old word audio
   from replaying when the book's profile is activated or restored.
 - Show saved settings before their controls appear, preventing switches and
