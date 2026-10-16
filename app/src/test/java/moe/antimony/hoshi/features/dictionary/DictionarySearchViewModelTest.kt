@@ -6,9 +6,13 @@ import de.manhhao.hoshi.LookupResult
 import de.manhhao.hoshi.PitchEntry
 import de.manhhao.hoshi.TermResult
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import moe.antimony.hoshi.features.audio.AudioSettings
 import moe.antimony.hoshi.features.reader.ReaderSelectionData
 import moe.antimony.hoshi.features.reader.ReaderSelectionRect
@@ -19,6 +23,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import moe.antimony.hoshi.ui.UiText
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class DictionarySearchViewModelTest {
     @Test
     fun searchAndRedirectUseCurrentProfileFrequencySettings() {
@@ -233,6 +238,72 @@ class DictionarySearchViewModelTest {
         assertEquals(0, state.backSignal)
         assertEquals(0, state.forwardSignal)
         assertEquals(listOf("猫:16:16"), repository.lookupCalls)
+    }
+
+    @Test
+    fun resetSearchRejectsLateLookupResultsAndAllowsAnotherSearch() = runTest {
+        val repository = FakeDictionarySearchRepository(lookupResults = listOf(lookupResult("猫")))
+        val viewModel = DictionarySearchViewModel(
+            repository = repository,
+            coroutineScope = backgroundScope,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        runCurrent()
+        val pending = CompletableDeferred<Unit>()
+        repository.beforeRebuild = { pending.await() }
+        viewModel.applyExternalLookup("猫")
+        runCurrent()
+        assertTrue(viewModel.uiState.value.isSearching)
+
+        viewModel.resetSearch()
+        val cleared = viewModel.uiState.value
+        pending.complete(Unit)
+        runCurrent()
+
+        assertEquals(cleared, viewModel.uiState.value)
+        repository.beforeRebuild = {}
+        repository.lookupResults = listOf(lookupResult("犬"))
+        viewModel.applyExternalLookup("犬")
+        runCurrent()
+        assertEquals("犬", viewModel.uiState.value.results.single().matched)
+    }
+
+    @Test
+    fun resetSearchRejectsLateLookupFailure() = runTest {
+        val repository = FakeDictionarySearchRepository()
+        val viewModel = DictionarySearchViewModel(
+            repository = repository,
+            coroutineScope = backgroundScope,
+            ioDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        runCurrent()
+        val pending = CompletableDeferred<Unit>()
+        repository.beforeRebuild = { pending.await() }
+        viewModel.applyExternalLookup("猫")
+        runCurrent()
+
+        viewModel.resetSearch()
+        val cleared = viewModel.uiState.value
+        repository.error = IllegalStateException("old lookup failed")
+        pending.complete(Unit)
+        runCurrent()
+
+        assertEquals(cleared, viewModel.uiState.value)
+    }
+
+    @Test
+    fun resetBeforeLookupStartsDoesNotRestoreSearchingState() = runTest {
+        val repository = FakeDictionarySearchRepository(lookupResults = listOf(lookupResult("猫")))
+        val viewModel = DictionarySearchViewModel(repository, backgroundScope, StandardTestDispatcher(testScheduler))
+        runCurrent()
+
+        viewModel.applyExternalLookup("猫")
+        viewModel.resetSearch()
+        val cleared = viewModel.uiState.value
+        runCurrent()
+
+        assertEquals(cleared, viewModel.uiState.value)
+        assertTrue(repository.lookupCalls.isEmpty())
     }
 
     @Test
@@ -486,6 +557,7 @@ private class FakeDictionarySearchRepository(
     val lookupCalls = mutableListOf<String>()
     val lookupOptions = mutableListOf<de.manhhao.hoshi.LookupOptions>()
     var rebuildCount = 0
+    var beforeRebuild: suspend () -> Unit = {}
     var lookupResults = lookupResults
 
     override val dictionarySettings: StateFlow<DictionarySettings> = dictionarySettingsFlow
@@ -493,6 +565,7 @@ private class FakeDictionarySearchRepository(
 
     override suspend fun rebuildLookupQuery() {
         rebuildCount += 1
+        beforeRebuild()
     }
 
     override fun lookup(query: String, maxResults: Int, scanLength: Int, options: de.manhhao.hoshi.LookupOptions): List<LookupResult> {

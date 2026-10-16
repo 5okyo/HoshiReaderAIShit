@@ -144,6 +144,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Fixed
 
+- Clear the Dictionary tab's search when opening a book, preventing old word audio
+  from replaying when the book's profile is activated or restored.
 - Show saved settings before their controls appear, preventing switches and
   selections from briefly showing defaults when opening settings pages or panels.
 - Keep dictionaries marked `Exclude` in Anki Advanced available for lookup;

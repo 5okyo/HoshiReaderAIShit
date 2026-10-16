@@ -53,6 +53,7 @@ internal fun ReaderRouteDestination(
     onReaderSettingsChange: ((ReaderSettings) -> ReaderSettings) -> Unit,
     onReaderKeyEventHandlerChange: (((KeyEvent) -> Boolean)?) -> Unit,
     onBookmarkSaved: () -> Unit,
+    onBookLoaded: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -102,6 +103,7 @@ internal fun ReaderRouteDestination(
             }
         }
         value = loaded.activateProfileAndPrepareRender(
+            beforeProfileActivation = onBookLoaded,
             activateForBook = { metadata ->
                 appContainer.profileActivationService.activateForBook(metadata).let { profile ->
                     ContentLanguageProfile.fromDictionaryLanguageId(profile.dictionaryLanguageId)
@@ -295,9 +297,11 @@ internal suspend fun ReaderRouteLoadState.activateProfileAndPrepareRender(
     clearLoadedProfile: () -> Unit,
     loadReaderSettings: suspend () -> ReaderSettings,
     loadGeneration: Int = 0,
+    beforeProfileActivation: () -> Unit = {},
 ): ReaderRouteRenderState =
     when (this) {
         is ReaderRouteLoadState.Ready -> {
+            beforeProfileActivation()
             val contentLanguageProfile = activateForBook(entry.metadata)
             ReaderRouteRenderState.Ready(
                 loadState = this,

@@ -363,6 +363,7 @@ fun AppShell(
                         onReaderSettingsChange = currentOnReaderSettingsChange,
                         onReaderKeyEventHandlerChange = currentOnReaderKeyEventHandlerChange,
                         onBookmarkSaved = readerBookmarkRefreshState::markDirty,
+                        onBookLoaded = dictionarySession::clearForReader,
                         onClose = ::closeReaderRoute,
                         modifier = Modifier.fillMaxSize(),
                     )

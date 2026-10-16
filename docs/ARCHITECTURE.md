@@ -435,6 +435,11 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   measured viewport/header dimensions; empty search/profile resets clear the
   stack immediately. Inactive search fields cannot request focus or show the
   keyboard. Do not put Activity-backed WebViews in ViewModels.
+  A successful Reader load clears this session before activating the book's
+  profile, including its query, results, recursive popups and JS history. The
+  reset reaches the retained WebView and refreshes the hidden UI's collected
+  state; lookup versions prevent pre-reset queries from publishing late results
+  or failures. Loading and failed Reader loads leave the search intact.
 - Built-in remote word audio uses Yomitan's Japanese source order:
   JapanesePod101, LanguagePod101, and Jisho. `BuiltInAudioSource` owns stable
   internal source URLs and resource-backed names. `AudioSettingsRepository`

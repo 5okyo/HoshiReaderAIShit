@@ -105,7 +105,7 @@ internal class DictionarySearchViewModel : ViewModel {
     val uiState: StateFlow<DictionarySearchUiState> = _uiState.asStateFlow()
 
     private var observedEffectiveProfileId: String? = null
-    private var profileChangeVersion: Int = 0
+    private var lookupVersion: Int = 0
 
     private fun collectInitialState() {
         scope.launch {
@@ -130,6 +130,7 @@ internal class DictionarySearchViewModel : ViewModel {
     }
 
     fun resetSearch() {
+        lookupVersion += 1
         _uiState.update { current ->
             DictionarySearchUiState(
                 dictionarySettings = current.dictionarySettings,
@@ -153,7 +154,7 @@ internal class DictionarySearchViewModel : ViewModel {
         observedEffectiveProfileId = profileId
         if (previousProfileId == null) return
 
-        profileChangeVersion += 1
+        lookupVersion += 1
         _uiState.update { current ->
             current.copy(
                 lastQuery = "",
@@ -181,8 +182,9 @@ internal class DictionarySearchViewModel : ViewModel {
     fun runLookup() {
         val query = _uiState.value.query
         val dictionarySettings = _uiState.value.dictionarySettings.normalized()
-        val lookupProfileVersion = profileChangeVersion
+        val requestVersion = ++lookupVersion
         scope.launch {
+            if (requestVersion != lookupVersion) return@launch
             _uiState.update { it.copy(isSearching = true, errorMessage = null, sentenceOffset = null) }
             runCatching {
                 withContext(ioDispatcher) {
@@ -203,7 +205,7 @@ internal class DictionarySearchViewModel : ViewModel {
                     }
                 }
             }.onSuccess { state ->
-                if (lookupProfileVersion == profileChangeVersion) {
+                if (requestVersion == lookupVersion) {
                     _uiState.update {
                         it.copy(
                             lastQuery = state.lastQuery,
@@ -223,7 +225,7 @@ internal class DictionarySearchViewModel : ViewModel {
                     }
                 }
             }.onFailure { error ->
-                if (lookupProfileVersion == profileChangeVersion) {
+                if (requestVersion == lookupVersion) {
                     _uiState.update {
                         it.copy(
                             lastQuery = query.trim(),

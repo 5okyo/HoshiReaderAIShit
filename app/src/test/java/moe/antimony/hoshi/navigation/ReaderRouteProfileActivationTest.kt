@@ -14,6 +14,41 @@ import org.junit.Test
 
 class ReaderRouteProfileActivationTest {
     @Test
+    fun readyReaderClearsDictionaryBeforeActivatingItsProfile() = runBlocking {
+        val events = mutableListOf<String>()
+
+        readerReadyState(profileId = "book-ja").activateProfileAndPrepareRender(
+            beforeProfileActivation = { events += "clear-dictionary" },
+            activateForBook = {
+                events += "activate-book-profile"
+                ContentLanguageProfile.Japanese
+            },
+            clearLoadedProfile = {},
+            loadReaderSettings = {
+                events += "load-book-settings"
+                ReaderSettings()
+            },
+        )
+
+        assertEquals(listOf("clear-dictionary", "activate-book-profile", "load-book-settings"), events)
+    }
+
+    @Test
+    fun loadingAndFailedBooksDoNotClearDictionary() = runBlocking {
+        var resetCount = 0
+        listOf(ReaderRouteLoadState.Loading, ReaderRouteLoadState.Error).forEach { state ->
+            state.activateProfileAndPrepareRender(
+                beforeProfileActivation = { resetCount++ },
+                activateForBook = { error("Book profile must not be activated") },
+                clearLoadedProfile = {},
+                loadReaderSettings = { error("Book settings must not be read") },
+            )
+        }
+
+        assertEquals(0, resetCount)
+    }
+
+    @Test
     fun readyReaderLoadActivatesBookProfile() {
         var activatedMetadata: BookMetadata? = null
         var clearCount = 0

@@ -139,6 +139,20 @@ node --test app/src/test/js/*.test.mjs
   `RetainedTabContentTest` checks that inactive content remains attached, has a
   CREATED lifecycle, and cannot consume another tab's Back action.
 
+- Opening a book ends the Dictionary tab's current search. With word-audio
+  autoplay enabled, search a word, follow a definition link, open a child popup,
+  then open a book whose profile has different popup scale/gesture settings.
+  Opening and closing Reader must not replay the old word; returning to Dictionary
+  must show an empty input, no results/popups, and no Back/Forward history. A new
+  search and manual audio playback must still work. Repeat with local audio when
+  already imported and with an available remote source; preserve installed data.
+  A failed book load must leave the search intact, and ordinary tab switches must
+  continue retaining it. `ReaderRouteProfileActivationTest` checks reset-before-
+  activation ordering; `DictionarySearchViewModelTest` checks late result/failure
+  rejection; `DictionarySearchReaderResetTest` uses real popup assets and in-memory
+  audio responses to check inactive reset and profile-setting changes without
+  modifying installed app data.
+
 - Book search: verify literal spaces/punctuation, case-insensitive matches,
   paragraph/`br` boundaries, ruby exclusion, complete bracketed sentence
   snippets, 100-result limit, and supplementary-plane characters before/inside

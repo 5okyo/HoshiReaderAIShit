@@ -171,7 +171,7 @@ internal fun DictionarySearchView(
     val assets = remember(context) { LookupPopupAssets.load(context) }
     val searchViewModel: DictionarySearchViewModel = hiltViewModel()
     val ankiViewModel: AnkiViewModel = hiltViewModel()
-    val uiState by searchViewModel.uiState.collectAsStateWithLifecycle()
+    val uiState by rememberDictionarySearchState(session, searchViewModel)
     val ankiUiState by ankiViewModel.uiState.collectAsStateWithLifecycle()
     val profileState by appContainer.profileRepository.state.collectAsStateWithLifecycle()
     var rootIframeAtTop by session.rootAtTop
