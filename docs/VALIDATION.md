@@ -798,6 +798,20 @@ Validate relevant dictionary/audio changes with:
   formats. Confirm button order and icon size, independent duplicate state,
   disabled formats whose first model field is unmapped, and safe failure after
   deleting a format or disconnecting AnkiConnect.
+- Anki Disable Button After Mining defaults off and appears only below
+  enabled Allow Duplicates. Check profile persistence and that toggling Allow
+  Duplicates off/on retains the safeguard preference. With both on, Reader,
+  Dictionary and Process Text popups immediately show a disabled completed icon
+  after each term/format succeeds, including terms already present in Anki.
+  Rapid taps and late duplicate checks must not create another note or re-enable
+  that button; failures remain retryable even when duplicate lookup is also
+  unavailable. Other terms/formats remain independent.
+  History back/forward retains the lock, even if creation finishes while that
+  result is detached. Changing glossary selection, selected text or audio does
+  not unlock it. Fresh results, child popups and closing/reopening the popup
+  have independent state; late callbacks must not change replacement results.
+  Repeat with AnkiDroid and AnkiConnect, and confirm existing behavior with the
+  safeguard off.
 - Reader, Dictionary tab, and Process Text popup Kanji redirects: tap individual
   Kanji in furigana and plain term headers, verify readings/meanings and
   back/forward restoration, and confirm one touch does not issue a duplicate

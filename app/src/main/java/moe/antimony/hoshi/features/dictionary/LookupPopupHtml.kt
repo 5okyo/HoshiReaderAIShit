@@ -217,6 +217,7 @@ internal object LookupPopupHtml {
                     window.audioPlaybackMode = "${audioSettings.playbackMode.rawValue}";
                     window.needsAudio = ${ankiSettings.needsAudio};
                     window.allowDupes = ${ankiSettings.allowDupes};
+                    window.preventAccidentalDuplicates = ${ankiSettings.preventAccidentalDuplicates};
                     window.useAnkiConnect = ${ankiSettings.useAnkiConnect};
                     window.compactGlossariesAnki = ${ankiSettings.compactGlossaries};
                     window.excludedDictionaries = ${dictionaryNamesJson(ankiSettings.excludedDictionaries.toSet())};

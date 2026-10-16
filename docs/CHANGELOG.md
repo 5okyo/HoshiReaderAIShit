@@ -8,6 +8,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Added
 
+- Add Disable Button After Mining under Anki's Allow Duplicates: disable each term/format
+  after successful mining until the popup is reopened.
 - Read Japanese books aloud using installed Android TTS engines or Edge, Azure,
   Microsoft Translator, Google Cloud and Google Translate online sources, plus multiple named
   self-hosted OpenAI Compatible and VITS Simple API servers, with a separate

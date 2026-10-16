@@ -225,6 +225,14 @@ fun AnkiView(
                         checked = uiState.settings.allowDupes,
                         onCheckedChange = viewModel::updateAllowDupes,
                     )
+                    if (uiState.settings.allowDupes) {
+                        AnkiDivider()
+                        AnkiSwitchRow(
+                            label = stringResource(R.string.anki_prevent_accidental_duplicates),
+                            checked = uiState.settings.preventAccidentalDuplicates,
+                            onCheckedChange = viewModel::updatePreventAccidentalDuplicates,
+                        )
+                    }
                     AnkiDivider()
                     AnkiSwitchRow(
                         label = stringResource(R.string.anki_disable_show_notes),

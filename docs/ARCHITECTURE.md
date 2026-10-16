@@ -492,6 +492,14 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   the built-in reader provider. Publishing failures do not block Reader
   loading, and the integration does not request broad storage access.
 - Anki work stays behind the Anki backend/repository boundary.
+- The optional Anki accidental-duplicate safeguard is active only with Allow
+  Duplicates. Shared popup JS owns pending/success state on each rendered
+  term/format button; history retains those nodes, while fresh results and new
+  popups start fresh. Duplicate-check refreshes cannot override pending or
+  successful guarded actions. Mining callbacks retain their original result
+  and button container rather than resolving a replacement result by index.
+  Failed guarded attempts restore the preceding button states without depending
+  on another duplicate lookup against the potentially unavailable backend.
 - Anki settings are stored per active profile in
   `Profiles/<profileId>/anki_config.json`. Schema version 2 owns one to three
   stable-ID `AnkiCardFormat` values, each with its own icon, deck, note type,

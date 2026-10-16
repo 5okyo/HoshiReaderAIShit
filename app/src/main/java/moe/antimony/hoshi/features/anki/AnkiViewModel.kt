@@ -98,6 +98,7 @@ data class AnkiUiState(
                 needsSasayakiAudio = activeMappings.any { "{sasayaki-audio}" in it },
                 needsSentenceAudio = activeMappings.any { "{sentence-audio}" in it },
                 allowDupes = settings.allowDupes,
+                preventAccidentalDuplicates = settings.allowDupes && settings.preventAccidentalDuplicates,
                 compactGlossaries = settings.compactGlossaries,
                 disableShowNotes = settings.disableShowNotes,
                 excludedDictionaries = excludedDictionaries,
@@ -312,6 +313,12 @@ internal class AnkiViewModel @Inject constructor(
     fun updateAllowDupes(value: Boolean) {
         viewModelScope.launch {
             repository.updateSettings { it.copy(allowDupes = value) }
+        }
+    }
+
+    fun updatePreventAccidentalDuplicates(value: Boolean) {
+        viewModelScope.launch {
+            repository.updateSettings { it.copy(preventAccidentalDuplicates = value) }
         }
     }
 

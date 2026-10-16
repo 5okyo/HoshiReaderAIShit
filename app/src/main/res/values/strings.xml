@@ -567,6 +567,7 @@
     <string name="anki_deck" comment="Anki deck selector label, intentionally matching duplicate scope deck label.">Deck</string>
     <string name="anki_model">Model</string>
     <string name="anki_allow_duplicates">Allow Duplicates</string>
+    <string name="anki_prevent_accidental_duplicates">Disable Button After Mining</string>
     <string name="anki_check_duplicates_all_models">Check for duplicates across all models</string>
     <string name="anki_duplicate_check_scope">Duplicate Check Scope</string>
     <string name="anki_compact_glossaries" comment="Anki setting label, intentionally matching dictionary compact glossaries.">Compact Glossaries</string>

@@ -565,6 +565,7 @@
     <string name="anki_deck" comment="Anki deck selector label, intentionally matching duplicate scope deck label.">牌组</string>
     <string name="anki_model">模板</string>
     <string name="anki_allow_duplicates">允许重复</string>
+    <string name="anki_prevent_accidental_duplicates">制卡后禁用按钮</string>
     <string name="anki_check_duplicates_all_models">跨所有模板检查重复</string>
     <string name="anki_duplicate_check_scope">重复检查范围</string>
     <string name="anki_compact_glossaries">紧凑释义</string>
