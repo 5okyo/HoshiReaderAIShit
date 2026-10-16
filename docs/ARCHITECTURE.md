@@ -1013,8 +1013,10 @@ QA matrices live in `docs/VALIDATION.md`.
   IO dispatcher.
   Catalogs have no age-based refresh. Source configuration fingerprints prevent reuse after
   region/key changes without storing credentials in catalog files. Missing/corrupt catalogs
-  are fetched again, failures are not cached, and explicit error retry/configuration save
-  forces a fetch. Every Voice picker exposes a fixed manual refresh action above the list;
+  are fetched again, failures are not cached, and explicit error retry or saving/deleting
+  the active source's cloud credentials forces a fetch. Editing another source's cloud
+  credentials does not refresh the active catalog or stop its preview.
+  Every Voice picker exposes a fixed manual refresh action above the list;
   it bypasses the catalog cache without changing voice preferences or audio caches.
   Refresh failures retain a valid previous catalog and show the localized error in the picker.
   `TtsViewModel.catalogLoading` disables repeated refresh requests independently of preview

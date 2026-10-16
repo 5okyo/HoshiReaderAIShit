@@ -133,17 +133,21 @@ class TtsViewModel @Inject constructor(
 
     suspend fun configure(source: TtsOnlineSource, region: String, key: String): TtsFailure? = try {
         val config = configuration(source, region, key)
-        stopPreview()
         repository.configure(source, config)
-        refresh(force = true)
+        if (repository.preferences.first().settings.engine == source.id) {
+            stopPreview()
+            refresh(force = true)
+        }
         null
     } catch (error: CancellationException) { throw error }
     catch (error: Exception) { (error as? TtsException)?.failure ?: TtsFailure.Storage }
 
     suspend fun removeKey(source: TtsOnlineSource): TtsFailure? = try {
         repository.removeOnlineKey(source)
-        stopPreview()
-        refresh(force = true)
+        if (repository.preferences.first().settings.engine == source.id) {
+            stopPreview()
+            refresh(force = true)
+        }
         null
     } catch (error: CancellationException) { throw error }
     catch (_: Exception) { TtsFailure.Storage }
