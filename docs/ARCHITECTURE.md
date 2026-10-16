@@ -528,9 +528,12 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   as one default format. Popup mining, per-format duplicate checks, and opening
   existing notes all carry the stable format ID through the reader bridge and
   still go through the Anki repository/backend boundary. AnkiConnect opens
-  notes with `guiBrowse`; AnkiDroid opens its browser with `search_query` and `all_decks=true` Intent
-  extras so the previous browser deck selection cannot narrow the requested
-  duplicate scope. At mining time,
+  notes with `guiBrowse`; AnkiDroid uses the public
+  `anki://x-callback-url/browser?search=...` deep link scoped to its detected
+  package. AnkiDroid 2.25 makes `CardBrowser` non-exported, so Hoshi does not
+  start that activity directly. The public link retains AnkiDroid's selected
+  browser deck, which can further narrow Hoshi's requested search scope.
+  At mining time,
   glossary-first and monolingual/bilingual definition handlebars resolve from
   the current profile's persisted term-dictionary order and categories without
   extending the popup mining payload. Anki popup settings carry the profile's

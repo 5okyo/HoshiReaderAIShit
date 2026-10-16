@@ -10,6 +10,7 @@ import com.ichi2.anki.FlashCardsContract
 import com.ichi2.anki.api.AddContentApi
 import java.lang.SecurityException
 import java.math.BigInteger
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.text.Normalizer
@@ -109,10 +110,8 @@ class AndroidAnkiContentApi @Inject constructor(
                 packageName = AddContentApi.getAnkiDroidPackageName(appContext) ?: "com.ichi2.anki",
             )
             appContext.startActivity(
-                Intent().apply {
-                    setClassName(spec.packageName, spec.activityClassName)
-                    spec.stringExtras.forEach { (key, value) -> putExtra(key, value) }
-                    spec.booleanExtras.forEach { (key, value) -> putExtra(key, value) }
+                Intent(spec.action, Uri.parse(spec.uri)).apply {
+                    setPackage(spec.packageName)
                     if (spec.newTask) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 },
             )
@@ -199,9 +198,8 @@ internal fun ankiDroidSyncIntentSpec(): AnkiDroidSyncIntentSpec =
     )
 
 internal data class AnkiDroidBrowserIntentSpec(
-    val activityClassName: String,
-    val stringExtras: Map<String, String>,
-    val booleanExtras: Map<String, Boolean>,
+    val action: String,
+    val uri: String,
     val packageName: String,
     val newTask: Boolean,
 )
@@ -211,11 +209,9 @@ internal fun ankiDroidBrowserIntentSpec(
     packageName: String = "com.ichi2.anki",
 ): AnkiDroidBrowserIntentSpec =
     AnkiDroidBrowserIntentSpec(
-        activityClassName = "com.ichi2.anki.CardBrowser",
-        // A URI search takes precedence over these extras and retains the last deck filter.
-        // Keep the requested duplicate scope in the query, not in the browser selection.
-        stringExtras = mapOf("search_query" to query),
-        booleanExtras = mapOf("all_decks" to true),
+        action = Intent.ACTION_VIEW,
+        uri = "anki://x-callback-url/browser?search=" +
+            URLEncoder.encode(query, StandardCharsets.UTF_8.name()),
         packageName = packageName,
         newTask = true,
     )

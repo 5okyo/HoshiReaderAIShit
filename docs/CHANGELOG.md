@@ -246,8 +246,7 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
   after following a definition link and swiping back.
 - Recognize existing AnkiDroid cards with equivalent Unicode spellings to prevent
   duplicate cards.
-- Open matching AnkiDroid cards regardless of its previously selected deck, while
-  honoring the duplicate-search setting.
+- Restore duplicate-note search in AnkiDroid 2.25 through its public browser link.
 - Report failed dictionary imports by filename and reason, then continue the batch.
 - Show a localized Reader message and Close action for missing or unreadable books.
 - Recover Reader after a crash while preserving reading position, highlights, and

@@ -825,13 +825,23 @@ Validate relevant dictionary/audio changes with:
   and the last format cannot be deleted. Confirming a deck/model fetch resets
   every format mapping while retaining IDs, names, icons, and tags.
 - Duplicate-note search through AnkiConnect `guiBrowse` and the AnkiDroid card
-  browser Intent for collection, deck, and deck-root scopes, including the
+  browser deep link for collection, deck, and deck-root scopes, including the
   all-models option and the global hide-search-button setting. Confirm the
   search button is absent when duplicate checking reports no matching note.
-  First select an unrelated deck in AnkiDroid, then open a matching note from
-  Hoshi: results must honor Hoshi’s scope without prompting to search all decks.
-  Do not combine a URI `search` parameter with the Intent extras: AnkiDroid
-  prioritizes the URI and retains its previous deck filter.
+  Include AnkiDroid 2.25+, whose `CardBrowser` activity is not exported: launch
+  through the public `anki://x-callback-url/browser?search=...` link, scoped to
+  the detected package. Do not directly launch `CardBrowser` or rely on the
+  internal `search_query` / `all_decks` extras. The public link retains
+  AnkiDroid's browser deck selection: with an unrelated deck selected, switch
+  its browser to All Decks and confirm Hoshi's original query still finds the
+  expected notes. Test Japanese, spaces, quotes, plus signs, and ampersands in
+  the query so URL encoding cannot change the search or add URL parameters.
+  The opt-in `AnkiBrowserDeviceTest` exercises the production API from Hoshi's
+  UID against installed, initialized AnkiDroid without creating or editing
+  cards. Build `assembleDebug assembleDebugAndroidTest`, install both APKs with
+  `adb install -r`, then run only that class with
+  `adb shell am instrument -w -r -e class moe.antimony.hoshi.features.anki.AnkiBrowserDeviceTest -e ankiBrowserSmoke true moe.antimony.hoshi.debug.test/androidx.test.runner.AndroidJUnitRunner`.
+  It opens the browser with a no-match `nid:0` query; preserve all app data.
   With an existing `あり難い` note, verify the `あり難い` dictionary result also
   shows the duplicate icon and disables mining when duplicates are disallowed.
   AnkiDroid first-field checksums must follow Anki’s NFC normalization before
