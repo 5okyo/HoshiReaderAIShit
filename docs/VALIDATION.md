@@ -698,7 +698,10 @@ Validate relevant dictionary/audio changes with:
   dismissal, definitions must scroll normally again. In a short bottom popup,
   open a long recording list: it must fit above or below the audio button
   without covering it, including as delayed candidates arrive. Repeat with
-  the trigger near the bottom and popup scales 0.8, 1, and 2.
+  the trigger near the bottom and popup scales 0.8, 1, 1.6, and 2. In narrow
+  popups, verify the entire menu border and wrapped source names remain visible.
+  Geometry fixtures must model Chromium's zoomed `getBoundingClientRect()`
+  dimensions separately from unzoomed `offsetWidth`/`offsetHeight`.
 - default remote word audio: new settings list JapanesePod101, LanguagePod101,
   then Jisho. Upgrade from an enabled and a disabled old built-in proxy source;
   verify in-place expansion, retained custom/local sources and ordering, and

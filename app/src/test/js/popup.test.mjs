@@ -695,6 +695,17 @@ test('popup geometry keeps scaled visual positions in the scroll coordinate spac
     );
 });
 
+test('popup fixed layout coordinates use CSS zoom even when DOM rects already include zoom', () => {
+    const { context } = popupContext({ htmlZoom: '1.6', htmlProbeWidth: 160 });
+    const geometry = context.window.hoshiPopupGeometry;
+
+    assert.equal(geometry.bridgeRectScale(), 1, 'Chromium DOM rects need no native bridge correction');
+    assert.deepEqual(
+        JSON.parse(JSON.stringify(geometry.visualViewportPointToLayout(320, 160))),
+        { x: 200, y: 100 },
+    );
+});
+
 test('popup touch tap suppresses the duplicate click generated for the same tap', () => {
     const { context, selectTextCalls } = popupContext();
     const container = new FakeContainer();
@@ -1736,7 +1747,7 @@ test('default mining completion does not cancel concurrent requested playback', 
 for (const zoom of [0.8, 1, 2]) {
     for (const side of ['below', 'above']) {
         test(`long audio menu stays ${side} its anchor in a short viewport at zoom ${zoom}`, async () => {
-            const { context, body, document } = popupContext({ htmlZoom: String(zoom) });
+            const { context, body, document } = popupContext({ htmlZoom: String(zoom), htmlProbeWidth: 100 * zoom });
             context.window.innerWidth = 320 * zoom;
             context.window.innerHeight = 200 * zoom;
             const createElement = document.createElement.bind(document);
@@ -1762,3 +1773,35 @@ for (const zoom of [0.8, 1, 2]) {
         });
     }
 }
+
+test('audio menu fits a narrow zoomed viewport even when its preferred minimum width is too large', async () => {
+    const zoom = 2;
+    const { context, body, document } = popupContext({ htmlZoom: String(zoom), htmlProbeWidth: 100 * zoom });
+    context.window.innerWidth = 320;
+    context.window.innerHeight = 240;
+    const createElement = document.createElement.bind(document);
+    document.createElement = tag => {
+        const element = createElement(tag);
+        Object.defineProperty(element, 'offsetWidth', {
+            get: () => Math.max(parseFloat(element.style.minWidth) || 180,
+                Math.min(280, parseFloat(element.style.maxWidth) || 280)),
+        });
+        Object.defineProperty(element, 'offsetHeight', {
+            get: () => Math.min(600, parseFloat(element.style.maxHeight) || 600),
+        });
+        return element;
+    };
+    const anchor = new FakeElement();
+    anchor.getBoundingClientRect = () => ({ left: 260, right: 304, top: 20, bottom: 64 });
+    context.window.lookupEntries = [{ expression: '猫', reading: 'ねこ' }];
+    context.window.audioSources = [{ name: 'Remote', url: 'remote://' }];
+    await context.showAudioCandidateMenu(0, anchor);
+
+    const menu = body.children.find(child => child.className === 'audio-candidate-menu');
+    const left = parseFloat(menu.style.left) * zoom;
+    const right = left + menu.offsetWidth * zoom;
+    const top = parseFloat(menu.style.top) * zoom;
+    const bottom = top + menu.offsetHeight * zoom;
+    assert.ok(left >= 8 * zoom && right <= 320 - 8 * zoom, 'menu fits horizontally with scaled margins');
+    assert.ok(top >= 64 + 4 * zoom && bottom <= 240 - 8 * zoom, 'menu fits below the trigger');
+});

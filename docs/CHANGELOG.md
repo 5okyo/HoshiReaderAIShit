@@ -140,6 +140,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Fixed
 
+- Keep the audio-source menu beside its speaker button and fully inside lookup
+  popups when popup scale is above 1, including narrow popups.
 - Restore the text-selection menu after handle drags in paginated paragraphs,
   with or without ruby, and keep it near visible text when WebView reports empty
   or offscreen menu coordinates.

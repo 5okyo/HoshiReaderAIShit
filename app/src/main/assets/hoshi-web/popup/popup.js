@@ -136,7 +136,10 @@ window.createPopupGeometry = function({
     }
 
     function visualViewportPointToLayout(x, y) {
-        const scale = bridgeRectScale();
+        // Fixed CSS positions use unzoomed layout pixels, even when Chromium
+        // already includes HTML zoom in DOM rects and needs no bridge correction.
+        const zoom = Number.parseFloat(computedStyle(documentRef.documentElement).zoom);
+        const scale = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
         return {
             x: x / scale,
             y: y / scale,
@@ -1801,6 +1804,9 @@ async function showAudioCandidateMenu(entryIndex, anchor) {
             const availableHeight = openBelow ? spaceBelow : spaceAbove;
             // Keep the trigger uncovered as asynchronous candidates grow the menu.
             menu.style.maxHeight = `${availableHeight}px`;
+            const availableWidth = Math.max(0, viewport.x - 16);
+            menu.style.minWidth = `${Math.min(180, availableWidth)}px`;
+            menu.style.maxWidth = `${Math.min(280, availableWidth)}px`;
             const menuWidth = menu.offsetWidth || 220;
             const menuHeight = menu.offsetHeight || Math.min(Math.max(1, sources.length) * 40, availableHeight);
             menu.style.left = `${Math.max(8, Math.min(anchorPoint.x - menuWidth, viewport.x - menuWidth - 8))}px`;
