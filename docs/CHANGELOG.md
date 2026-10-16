@@ -20,7 +20,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
   includes cloud credential configuration, with system TTS settings always available as
   a separate action above the Device engines group. Advanced settings label
   dictionary pronunciation settings as Word audio to distinguish them from narration,
-  and omit subtitles for Sasayaki and Book Cover Lock Screen. Add independent Hoshi
+  and give TTS its own speaking-person icon.
+  Omit subtitles for Sasayaki and Book Cover Lock Screen. Add independent Hoshi
   playback speed from 0.5× to 3.0× alongside engine speech rate; it applies to narration
   and preview without re-synthesizing audio, shifting pitch, or resuming paused playback. Rate and pitch sliders
   keep their steps without dense tick marks or endpoint labels, and preview can be canceled or stopped from

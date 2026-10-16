@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.rounded.VolumeUp
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.GraphicEq
 import androidx.compose.material.icons.rounded.Link
+import androidx.compose.material.icons.rounded.RecordVoiceOver
 import androidx.compose.material.icons.rounded.Storage
 import androidx.compose.material.icons.rounded.Wallpaper
 import androidx.compose.material3.Icon
@@ -150,6 +151,7 @@ internal enum class AdvancedDestination {
 
 internal enum class AdvancedSettingsIcon {
     Speaker,
+    Voice,
     Waveform,
     Cloud,
     AnkiConnect,
@@ -176,7 +178,7 @@ internal fun advancedSettingsSections(): List<AdvancedSettingsSection> =
                     destination = AdvancedDestination.Audio,
                     icon = AdvancedSettingsIcon.Speaker,
                 ),
-                AdvancedSettingsRow(titleRes = R.string.tts_title, destination = AdvancedDestination.Tts, icon = AdvancedSettingsIcon.Speaker),
+                AdvancedSettingsRow(titleRes = R.string.tts_title, destination = AdvancedDestination.Tts, icon = AdvancedSettingsIcon.Voice),
                 AdvancedSettingsRow(
                     titleRes = R.string.advanced_sasayaki_audiobooks,
                     destination = AdvancedDestination.Sasayaki,
@@ -221,6 +223,7 @@ internal fun advancedSettingsSections(): List<AdvancedSettingsSection> =
 private fun AdvancedSettingsIcon.imageVector(): ImageVector =
     when (this) {
         AdvancedSettingsIcon.Speaker -> Icons.AutoMirrored.Rounded.VolumeUp
+        AdvancedSettingsIcon.Voice -> Icons.Rounded.RecordVoiceOver
         AdvancedSettingsIcon.Waveform -> Icons.Rounded.GraphicEq
         AdvancedSettingsIcon.Cloud -> Icons.Rounded.Cloud
         AdvancedSettingsIcon.AnkiConnect -> Icons.Rounded.Link
