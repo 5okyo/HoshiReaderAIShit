@@ -166,6 +166,45 @@ node --test app/src/test/js/*.test.mjs
   Selecting only a visible part of a cross-screen highlight creates a separate
   range rather than editing the complete stored range. Preserve device data.
 
+- While selecting text, dismiss/recreate the native menu and drag selection
+  handles into ruby annotations, then choose Highlight and a color. The body text
+  must be marked without annotations; selecting the same range must recolor/remove
+  the original mark. `ReaderNativeHighlightWebViewTest` covers picker range retention,
+  annotation/element endpoints and forward/backward selections in all six reader
+  mode/writing-direction combinations, using isolated HTML with no sidecar writes.
+  Run it using the data-preserving explicit instrumentation procedure above.
+
+- While selecting text, dismiss/recreate the native menu and drag selection
+  handles near ruby and page edges. Paginated/VN navigation must remain blocked
+  until the selection clears, without crossing a chapter boundary; continuous
+  mode must not treat handle drags as reader gestures. After deselection, normal
+  navigation must resume. `ReaderNativeSelectionStateWebViewTest` uses generated
+  vertical paginated content and a real ActionMode to check surviving selection,
+  logical page retention, blocked navigation versus chapter boundaries,
+  and stale document notification rejection. It also checks empty/offscreen
+  native menu bounds against the visible DOM selection, preserves valid native
+  bounds, and discards fallback coordinates after selection movement or scroll
+  within the same ActionMode. On device, long-press ruby-adjacent base text and
+  confirm the menu stays beside the selected text; in continuous mode, scroll
+  the selection out of view and verify no stale toolbar remains pinned. Run it
+  with the data-preserving explicit instrumentation procedure above.
+  `ReaderSelectionViewportWebViewTest` also checks native handle drags with
+  narration cues prepared, menu recreation after dragging plain text in a single
+  paragraph spanning pages, and
+  immediate scroll prevention, visible/logical position retention, and resumed
+  paging in both writing directions. Verify the visible menu reappears after
+  repeated drags in both plain and ruby-adjacent text, preserves the dragged
+  range, and copies/highlights that range. Existing ActionMode or selected-text
+  state alone does not prove menu visibility. Record the tested WebView version:
+  recovery uses generic secondary-button events, whose zero-actionButton handling
+  differs across Chromium versions. Repeat real-book ruby handle drags and
+  inspect recordings frame by frame for unrelated columns becoming selected;
+  final scroll position alone cannot validate this. During gesture acceptance,
+  do not poll DOM geometry or suspend threads with JDWP method tracing: both
+  change timing and can mask the bug or stall the UI. If range events are needed,
+  record DOM endpoints/Range text in memory without layout reads, then retrieve
+  them after the gesture. Also run an uninstrumented recording.
+
 ### Theme
 
 Preserve app data and cover all four tabs, every settings category, native Reader
@@ -1261,7 +1300,13 @@ Validate relevant sync/update/Sasayaki changes with:
   cover these boundaries; `TtsPanelStateTest` covers the actual Settings switch and reopening.
 - Long-press book text and choose Replace beside Highlight: prefill the selected original and
   empty replacement text, and preview the full source sentence including ruby and VN
-  text outside the screen. Check the dialog title identifies TTS, the equal-width
+  text outside the screen. Include a selection starting inside ruby annotation and ending
+  in the following base text (for example, only `々` in `瑞々`): Replace must open and
+  exclude annotations. `ReaderNativeSelectionContextWebViewTest` exercises real DOM
+  ranges and VN source projection in both writing directions, forward/backward selections,
+  text/element end boundaries, annotation-only ranges and emoji, checking unchanged native
+  endpoints. Run it with the data-preserving explicit instrumentation procedure above.
+  Check the dialog title identifies TTS, the equal-width
   scope selector beside its label, compact rule/regex row, and full-width themed secondary
   preview button (including its busy state),
   in both languages and light/dark/e-ink themes. Cancel without saving. With a multilingual IME, start in another input

@@ -13,11 +13,14 @@ function selectionSource() {
         japaneseLanguageUrl,
         japaneseSelectionUrl,
         englishSelectionUrl,
+        new URL('../../main/assets/hoshi-web/reader/reader-dom-text.js', import.meta.url),
         sharedSelectionUrl,
     ].map((url) => fs.readFileSync(url, 'utf8')).join('\n');
 }
 
 function loadSelection(text) {
+    let nativeSelection = null;
+    const listeners = {};
     const textNode = {
         nodeType: 3,
         textContent: text,
@@ -71,7 +74,7 @@ function loadSelection(text) {
         elementFromPoint() {
             return this.pointElement;
         },
-        addEventListener() {},
+        addEventListener(name, listener) { listeners[name] = listener; },
     };
     const window = {
         getComputedStyle() {
@@ -81,9 +84,11 @@ function loadSelection(text) {
 
     vm.runInNewContext(selectionSource(), {
         CSS: {},
+        innerWidth: 400,
+        innerHeight: 800,
         document,
         getSelection() {
-            return null;
+            return nativeSelection;
         },
         Node: { TEXT_NODE: 3 },
         NodeFilter: { SHOW_TEXT: 4, FILTER_ACCEPT: 1, FILTER_REJECT: 2 },
@@ -92,6 +97,11 @@ function loadSelection(text) {
 
     return {
         document,
+        dispatchDocumentEvent(name, event) { listeners[name]?.(event); },
+        changeNativeSelection(value) {
+            nativeSelection = value;
+            listeners.selectionchange();
+        },
         selection: window.hoshiSelection,
         textNode,
         window,
@@ -795,14 +805,155 @@ test('native pronunciation selection uses full source sentence and excludes ruby
         toSemanticHit: () => source,
         normalizedOffsetForHit: () => 42,
     }});
-    const fragment = { textContent: '東京', querySelectorAll: () => [] };
     window.getSelection = () => ({ rangeCount: 1, getRangeAt: () => ({
         collapsed: false, startContainer: textNode, startOffset: 0,
-        cloneContents: () => fragment,
+        endContainer: textNode, endOffset: 2, commonAncestorContainer: textNode,
+        comparePoint: () => 0, intersectsNode: node => node === textNode,
         getBoundingClientRect: () => ({ x: 0, y: 0, width: 10, height: 20 }),
     }) });
     const result = selection.nativeSelectionContext();
     assert.equal(result.text, '東京');
     assert.equal(result.sentence, '東京へ行きました。');
     assert.equal(result.normalizedOffset, 42);
+});
+
+
+test('native selection locks the reader before notifying Android, independent of menu visibility', () => {
+    const { selection, window, changeNativeSelection } = loadSelection('本文');
+    const events = [];
+    selection.configure({ bridge: 'android-reader', nativeSelectionToken: 'chapter-a' });
+    window.hoshiReader = { setNativeSelectionActive: active => events.push(['lock', active]) };
+    window.HoshiNativeSelection = { postMessage: (active, token) => events.push(['android', active, token]) };
+    changeNativeSelection({ isCollapsed: false });
+    changeNativeSelection({ isCollapsed: false });
+    changeNativeSelection({ isCollapsed: true });
+    assert.deepEqual(events, [
+        ['lock', true], ['android', true, 'chapter-a'],
+        ['lock', false], ['android', false, 'chapter-a'],
+    ]);
+});
+
+test('selection notifications preserve the WebKit bridge outside the Android reader', () => {
+    const { window, changeNativeSelection } = loadSelection('本文');
+    const events = [];
+    window.webkit = { messageHandlers: { selectionState: { postMessage: active => events.push(active) } } };
+    window.HoshiNativeSelection = { postMessage: () => assert.fail('Popup selection must not lock the reader') };
+    changeNativeSelection({ isCollapsed: false });
+    changeNativeSelection(null);
+    assert.deepEqual(events, [true, false]);
+});
+
+
+test('native menu anchor includes only visible selection fragments without changing selection', () => {
+    const { selection, window } = loadSelection('読書');
+    let rects = [
+        { left: 30, top: -200, right: 80, bottom: -100 },
+        { left: 420, top: 50, right: 450, bottom: 60 },
+        { left: 280, top: 590, right: 320, bottom: 640 },
+        { left: 280, top: 640, right: 320, bottom: 830 },
+    ];
+    const native = {
+        isCollapsed: false, rangeCount: 1, toString: () => '読書',
+        getRangeAt: () => ({ getClientRects: () => rects }),
+    };
+    window.getSelection = () => native;
+    assert.deepEqual(JSON.parse(JSON.stringify(selection.nativeSelectionMenuRect())),
+        { left: 280, top: 590, right: 320, bottom: 800, viewportWidth: 400 });
+    rects = rects.slice(0, 2);
+    assert.equal(selection.nativeSelectionMenuRect(), null);
+    native.isCollapsed = true;
+    native.getRangeAt = () => assert.fail('Collapsed selection needs no geometry read');
+    assert.equal(selection.nativeSelectionMenuRect(), null);
+    native.isCollapsed = false;
+    native.toString = () => '';
+    assert.equal(selection.nativeSelectionMenuRect(), null);
+});
+
+
+test('native menu measurement is invalidated once by selection or scroll without reading layout', () => {
+    const { selection, window, changeNativeSelection, dispatchDocumentEvent } = loadSelection('読書');
+    const events = [];
+    let reads = 0;
+    const native = {
+        isCollapsed: false, rangeCount: 1, toString: () => '読書',
+        getRangeAt: () => ({ getClientRects: () => {
+            reads++;
+            return [{ left: 20, top: 50, right: 40, bottom: 90 }];
+        }}),
+    };
+    window.getSelection = () => native;
+    selection.configure({ bridge: 'android-reader', nativeSelectionToken: 'chapter-a' });
+    window.HoshiNativeSelection = {
+        postMessage() {},
+        invalidateMenuAnchor: (id, token) => events.push([id, token]),
+    };
+    selection.nativeSelectionMenuRect(1);
+    changeNativeSelection(native);
+    changeNativeSelection(native);
+    dispatchDocumentEvent('scroll');
+    assert.deepEqual(events, [[1, 'chapter-a']]);
+    assert.equal(reads, 1, 'Invalidation never reads layout');
+    selection.nativeSelectionMenuRect(2);
+    dispatchDocumentEvent('scroll');
+    dispatchDocumentEvent('scroll');
+    assert.deepEqual(events, [[1, 'chapter-a'], [2, 'chapter-a']]);
+    assert.equal(reads, 2);
+});
+
+
+test('invalid touch menu requests recover once at a visible selected character', () => {
+    const { selection, window, document, dispatchDocumentEvent, changeNativeSelection } = loadSelection('読書');
+    const calls = [];
+    const invalidations = [];
+    const textNode = { nodeType: 3 };
+    const range = {
+        getClientRects: () => [{left:20,top:40,right:40,bottom:80}],
+        comparePoint: (node) => node === textNode ? 0 : 1,
+    };
+    const native = { isCollapsed:false,rangeCount:1,toString:()=> '読書',getRangeAt:()=>range };
+    window.getSelection = () => native;
+    document.caretRangeFromPoint = () => ({startContainer:textNode,startOffset:0});
+    selection.configure({bridge:'android-reader',nativeSelectionToken:'chapter'});
+    window.HoshiNativeSelection = {
+        postMessage(){}, recoverMenu:(id,token)=>calls.push([id,token]),
+        invalidateMenuAnchor:(id,token)=>invalidations.push([id,token]),
+    };
+    const event = (overrides={}) => ({isTrusted:true,button:0,clientX:30,clientY:-400,preventDefault(){this.prevented=true;},...overrides});
+    dispatchDocumentEvent('contextmenu', event({clientY:50}));
+    dispatchDocumentEvent('contextmenu', event({isTrusted:false}));
+    dispatchDocumentEvent('contextmenu', event({button:2}));
+    assert.equal(calls.length,0,'Normal, script, and mouse menus are not replayed');
+    const broken = event();
+    dispatchDocumentEvent('contextmenu',broken);
+    assert.equal(broken.prevented,true);
+    assert.equal(calls.length,1);
+    assert.equal(calls[0][1],'chapter');
+    assert.equal(selection.takeNativeMenuRecovery(calls[0][0]+1),null);
+    assert.deepEqual(JSON.parse(JSON.stringify(selection.takeNativeMenuRecovery(calls[0][0], 42))),
+        {x:30,y:60,viewportWidth:400});
+    assert.equal(selection.takeNativeMenuRecovery(calls[0][0]),null,'A request can be consumed only once');
+    changeNativeSelection(native);
+    assert.deepEqual(invalidations, [[42, 'chapter']], 'Moving after consumption invalidates the pending native reply');
+    dispatchDocumentEvent('contextmenu',event());
+    changeNativeSelection(native);
+    assert.equal(selection.takeNativeMenuRecovery(calls.at(-1)[0]),null,'Moving the selection cancels recovery');
+    dispatchDocumentEvent('contextmenu',event());
+    dispatchDocumentEvent('scroll');
+    assert.equal(selection.takeNativeMenuRecovery(calls.at(-1)[0]),null,'Scrolling cancels recovery');
+    const precedingText = {nodeType:3};
+    range.comparePoint = (node) => node === precedingText ? -1 : node === textNode ? 0 : 1;
+    document.caretRangeFromPoint = (x) => ({startContainer:x === 100 ? precedingText : textNode,startOffset:0});
+    const misplaced = event({clientX:100,clientY:50});
+    dispatchDocumentEvent('contextmenu', misplaced);
+    assert.equal(misplaced.prevented,true,'Visible coordinates outside the selected text also need recovery');
+    assert.deepEqual(JSON.parse(JSON.stringify(selection.takeNativeMenuRecovery(calls.at(-1)[0], 43))),
+        {x:30,y:60,viewportWidth:400});
+    document.caretRangeFromPoint = () => ({startContainer:{},startOffset:0});
+    const count=calls.length;
+    dispatchDocumentEvent('contextmenu',event());
+    assert.equal(calls.length,count,'Do not replay over unselected text inside a block rectangle');
+    document.caretRangeFromPoint = () => ({startContainer:{parentElement:{closest:()=>({})}},startOffset:0});
+    range.comparePoint = () => 0;
+    dispatchDocumentEvent('contextmenu',event());
+    assert.equal(calls.length,count,'Ruby annotations are not a menu recovery target');
 });

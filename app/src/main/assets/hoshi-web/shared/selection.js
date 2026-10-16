@@ -877,28 +877,94 @@ window.hoshiSelection = {
         return count;
     },
 
+    nativeMenuAnchorRequest: null,
+    nativeMenuRecovery: null,
+    nativeMenuRecoverySequence: 0,
+
+    recoverNativeSelectionMenu(event) {
+        const bridge = window.HoshiNativeSelection;
+        if (this.options.bridge !== 'android-reader' || !bridge?.recoverMenu ||
+            !event.isTrusted || event.button === 2) return;
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString()) return;
+        const range = selection.getRangeAt(0);
+        const selectedCaretAt = (x, y) => {
+            const caret = document.caretRangeFromPoint(x, y);
+            return caret && !caret.startContainer.parentElement?.closest('rt, rp') &&
+                range.comparePoint(caret.startContainer, caret.startOffset) === 0;
+        };
+        if (event.clientX >= 0 && event.clientX < innerWidth &&
+            event.clientY >= 0 && event.clientY < innerHeight &&
+            selectedCaretAt(event.clientX, event.clientY)) return;
+        // Chromium can use a previous column's caret coordinates after a handle
+        // drag. Recover only at a visible point verified to belong to this range.
+        for (const rect of range.getClientRects()) {
+            const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+            const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
+            if (right <= left || bottom <= top) continue;
+            const x = (left + right) / 2, y = (top + bottom) / 2;
+            if (!selectedCaretAt(x, y)) continue;
+            const id = ++this.nativeMenuRecoverySequence;
+            this.nativeMenuRecovery = { id, point: { x, y, viewportWidth: innerWidth } };
+            event.preventDefault();
+            bridge.recoverMenu(id, this.options.nativeSelectionToken);
+            return;
+        }
+    },
+
+    takeNativeMenuRecovery(id, anchorRequest) {
+        if (this.nativeMenuRecovery?.id !== id) return null;
+        this.nativeMenuAnchorRequest = anchorRequest;
+        const point = this.nativeMenuRecovery.point;
+        this.nativeMenuRecovery = null;
+        return point;
+    },
+
+    invalidateNativeMenuAnchor() {
+        this.nativeMenuRecovery = null;
+        const request = this.nativeMenuAnchorRequest;
+        if (request == null) return;
+        this.nativeMenuAnchorRequest = null;
+        window.HoshiNativeSelection?.invalidateMenuAnchor(request, this.options.nativeSelectionToken);
+    },
+
+    nativeSelectionMenuRect(request) {
+        this.nativeMenuAnchorRequest = request ?? null;
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString()) return null;
+        // Read only when Android receives an unusable native menu anchor, never
+        // while tracking selection handles. Clip each fragment before unioning.
+        let bounds = null;
+        for (const rect of selection.getRangeAt(0).getClientRects()) {
+            const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+            const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
+            if (right <= left || bottom <= top) continue;
+            if (!bounds) bounds = { left, top, right, bottom, viewportWidth: innerWidth };
+            else {
+                bounds.left = Math.min(bounds.left, left);
+                bounds.top = Math.min(bounds.top, top);
+                bounds.right = Math.max(bounds.right, right);
+                bounds.bottom = Math.max(bounds.bottom, bottom);
+            }
+        }
+        return bounds;
+    },
+
     nativeSelectionContext() {
         const selection = window.getSelection();
         if (!selection || !selection.rangeCount) return null;
         const range = selection.getRangeAt(0);
         if (range.collapsed) return null;
-        let node = range.startContainer;
-        let offset = range.startOffset;
-        if (node.nodeType !== Node.TEXT_NODE) {
-            node = node.childNodes[offset];
-            while (node && node.nodeType !== Node.TEXT_NODE) node = node.firstChild;
-            offset = 0;
-        }
-        if (!node) return null;
+        const segments = window.hoshiReaderDomText.selectedTextSegments(range);
+        if (!segments.length) return null;
+        const first = { node: segments[0].node, offset: segments[0].start };
         const projection = this.options.textProjection;
-        const hit = projection ? projection.toSemanticHit?.({ node, offset }) : { node, offset };
+        const hit = projection ? projection.toSemanticHit?.(first) : first;
         if (!hit) return null;
-        const fragment = range.cloneContents();
-        fragment.querySelectorAll('rt, rp').forEach(element => element.remove());
         const context = this.getSentenceContext(hit.node, hit.offset);
         const rect = range.getBoundingClientRect();
         return {
-            text: fragment.textContent,
+            text: segments.map(({ node, start, end }) => node.textContent.slice(start, end)).join(''),
             sentence: context.sentence,
             sentenceOffset: context.sentenceOffset,
             normalizedOffset: projection ? projection.normalizedOffsetForHit?.(hit) : this.getNormalizedOffset(hit.node, hit.offset),
@@ -914,10 +980,20 @@ window.hoshiSelection = {
 };
 
 let lastHasSelection = false;
+document.addEventListener('contextmenu', event => window.hoshiSelection.recoverNativeSelectionMenu(event));
+document.addEventListener('scroll', () => window.hoshiSelection.invalidateNativeMenuAnchor(), true);
+window.addEventListener?.('resize', () => window.hoshiSelection.invalidateNativeMenuAnchor());
 document.addEventListener('selectionchange', () => {
+    window.hoshiSelection.invalidateNativeMenuAnchor();
     const s = getSelection();
     const hasSelection = !!s && !s.isCollapsed;
     if (hasSelection === lastHasSelection) return;
     lastHasSelection = hasSelection;
+    if (window.hoshiSelection.options.bridge === 'android-reader') {
+        // Selection survives native menu dismissal/recreation. Lock locally before
+        // notifying Android so handle autoscroll cannot race the bridge callback.
+        window.hoshiReader?.setNativeSelectionActive?.(hasSelection);
+        window.HoshiNativeSelection?.postMessage(hasSelection, window.hoshiSelection.options.nativeSelectionToken);
+    }
     try { window.webkit?.messageHandlers?.selectionState?.postMessage(hasSelection); } catch {}
 });

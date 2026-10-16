@@ -293,6 +293,10 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
 - Reader highlights keep plain text/raw offsets for positioning and optional
   iOS-compatible `textFurigana` for Contents display. The shared highlight asset
   owns exact-range identity and returns explicit create/recolor/remove results;
+  it reads the first/last selected body slices through
+  `reader-dom-text.js`'s `selectedTextSegments`, shared with native replacement
+  context. Annotation and element endpoints never become highlight offsets;
+  picker snapshots preserve the original native range until a color is chosen.
   Kotlin preserves record identity and creation time on edits through the
   existing sidecar repository. VN extracts highlight text/readings from its
   content stream and uses the range map only for screen projection. Batch
@@ -320,6 +324,11 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   three modes. VN captures CSS boundaries before detaching the chapter DOM,
   builds and caches this index from the complete source stream
   and projects expanded raw ranges through its existing screen range map.
+- Paginated/continuous narration keeps inline cue wrappers in normal mode and
+  geometry overlays in E-ink mode. Do not replace narration painting with CSS
+  Custom Highlights based on API support alone: WebView can clip the left edges
+  of vertical Japanese glyphs, including ruby-adjacent text. Any replacement
+  must first pass the real-WebView glyph-edge checks in `docs/VALIDATION.md`.
 - Reader image setup semantics live in `reader-media-semantics.js` and are
   consumed by paginated, continuous, and VN assets for shared gaiji class
   recognition, transparent monochrome inline-image tinting, SVG image
@@ -363,6 +372,34 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   accepts an optional semantic projection; paginated, continuous, and popup use
   the identity live-DOM path, while VN supplies its source/clone projection and
   fails closed when a clone hit cannot be mapped.
+  Native selection context reads only selected body-text slices using the shared
+  DOM text range extractor. Its first nonempty slice supplies the semantic source hit,
+  even when the native range begins inside `rt/rp` or at a text/element end.
+  Annotation-only ranges return no context; reading never changes native endpoints.
+- Reader DOM `selectionchange` owns the selected-text state. It synchronously
+  locks paginated/VN navigation and reports through `HoshiNativeSelection` with
+  the document restore token; Android ignores stale document notifications.
+  Native gesture/narration guards combine this state with the ActionMode and
+  highlight color workflow. Dismissing a menu alone does not clear a surviving
+  selection. Navigation blocked by selection returns `blocked`, never the
+  chapter-boundary `limit` result.
+  During paginated selection, CSS `overflow: clip` on the root and a relative
+  body offset preserve the visible page without a scrollable selection ancestor.
+  Logical page offsets stay unchanged; deselection restores the normal body
+  scroll position. This prevents Blink autoscroll and the reader's rollback from
+  moving selection endpoints back and forth. WebViews without overflow-clip
+  support retain the scroll-lock fallback. Native menus keep WebView's valid
+  ActionMode content bounds. If those bounds are empty or wholly offscreen,
+  Android may measure the visible DOM selection once per ActionMode and use its
+  clipped fragment bounds. Selection changes, scroll, and resize discard this
+  fallback without rereading layout during the gesture; document, mode, and
+  request-generation guards reject stale replies. If Chromium sends a trusted
+  touch context-menu request outside the viewport or selected text after a handle drag, shared
+  selection validates a visible point inside the current range. Android consumes
+  that point once and sends secondary-button events through WebView's generic
+  motion path to recreate the native menu without changing the selection.
+  Recovery shares the anchor generation guard; normal/mouse requests are never
+  replayed. Geometry is read only at the menu request, not during handle movement.
 - Reader, Dictionary search, and Process Text lookup popups render through the
   shared `reader-popup-host.js` iframe stack and `ReaderLookupPopupWebBridge`.
   Kotlin owns popup payloads, resource handling, and native service bridges for

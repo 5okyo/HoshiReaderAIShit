@@ -121,6 +121,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
   defaults new entries to all books, with a theme-colored selected scope and stable centered labels,
   and a full-width theme-colored preview button, with
   a destructive Delete action aligned beside Cancel and Save when editing an entry.
+  Replace also opens when a ruby-adjacent selection begins inside an annotation,
+  using only selected body text and preserving native selection handles.
   Text-selection creation previews the full original sentence; both fields request
   Japanese keyboard input; the replacement field offers Done to dismiss the keyboard
   before saving.
@@ -135,6 +137,18 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 ### Changed
 
 - Replace BIZ UDPGothic with BIZ UDGothic in the recommended reader fonts.
+
+### Fixed
+
+- Restore the text-selection menu after handle drags in paginated paragraphs,
+  with or without ruby, and keep it near visible text when WebView reports empty
+  or offscreen menu coordinates.
+- Create, recolor and remove highlights when native selections begin or end
+  inside ruby annotations or at element boundaries, using only selected body text.
+- Keep text selection from unexpectedly turning pages or chapters when the
+  native selection menu disappears or is recreated.
+- Reduce text-selection flicker in paginated reading by preventing selection
+  autoscroll while dragging selection handles.
 
 ## [v1.4.0] - 2026-09-24
 
