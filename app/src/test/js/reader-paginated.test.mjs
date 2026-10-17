@@ -38,6 +38,8 @@ function readerSource(url, options = {}) {
             options.layoutSemanticsScript ?? 'window.hoshiReaderLayoutSemantics = { sanitizeInlineBlocks: function() {} };',
         )
         .replaceAll('__HOSHI_RESTORE_TOKEN_LITERAL__', JSON.stringify('restore-token'))
+        .replaceAll('__HOSHI_CONTINUOUS_HORIZONTAL_PADDING_RATIO__', String(options.horizontalPaddingRatio ?? 0))
+        .replaceAll('__HOSHI_CONTINUOUS_VERTICAL_PADDING_RATIO__', String(options.verticalPaddingRatio ?? 0))
         .replaceAll('__HOSHI_VERTICAL_PADDING_BLOCK_RATIO__', '0')
         .replaceAll('__HOSHI_VERTICAL_PADDING_GAP_RATIO__', '0')
         .replaceAll('__HOSHI_IMAGE_WIDTH_VIEWPORT_RATIO__', '1')
@@ -183,7 +185,19 @@ class TestElement extends TestNode {
         this.parentNode?.removeChild(this);
     }
 
-    addEventListener() {}
+    addEventListener(name, callback) {
+        this.listeners ??= new Map();
+        this.listeners.set(name, callback);
+    }
+
+    scrollTo(options) {
+        if (Number.isFinite(options.left)) this.scrollLeft = options.left;
+        if (Number.isFinite(options.top)) this.scrollTop = options.top;
+    }
+
+    scrollBy(options) {
+        this.scrollTo({ left: this.scrollLeft + (options.left || 0), top: this.scrollTop + (options.top || 0) });
+    }
 
     scrollIntoView(options) {
         this.scrollIntoViewCalls = this.scrollIntoViewCalls ?? [];
@@ -420,6 +434,11 @@ function queryTagSelectorList(selector) {
 }
 
 function loadReader(body, sourceUrl = readerPaginatedUrl, options = {}) {
+    body.scrollLeft ??= 0;
+    body.scrollTop ??= 0;
+    body.clientWidth ??= 480;
+    body.clientHeight ??= 800;
+    body.rect ??= testRect(0, 800, 0, 480);
     const head = new TestElement('head');
     const documentElement = new TestElement('html');
     documentElement.appendChild(head);
@@ -495,6 +514,9 @@ function loadReader(body, sourceUrl = readerPaginatedUrl, options = {}) {
             return { writingMode: options.writingMode ?? 'vertical-rl', getPropertyValue: () => '' };
         },
     };
+    if (options.scrollMessages) {
+        window.HoshiReaderScroll = { postMessage: token => options.scrollMessages.push(token) };
+    }
     if (options.restoreMessages) {
         window.HoshiReaderRestore = {
             postMessage(message) {
@@ -718,7 +740,7 @@ test('paged and continuous readers use actual viewport height', () => {
 
     assert.equal(continuous.document.documentElement.style.getPropertyValue('--hoshi-continuous-height'), '800px');
     assert.equal(continuous.document.documentElement.style.getPropertyValue('--hoshi-reader-visible-height'), '800px');
-    assert.equal(continuous.document.documentElement.style.getPropertyValue('--page-height'), '');
+    assert.equal(continuous.document.documentElement.style.getPropertyValue('--page-height'), '800px');
 });
 
 test('paginated restoreProgress at chapter start avoids eager pagination metrics', async () => {
@@ -867,7 +889,8 @@ test('continuous Korean restore lands inside the target text after a supplementa
 
     await reader.restoreProgress(0.6);
 
-    assert.equal(window.scrollY, 120);
+    assert.equal(body.scrollTop, 120);
+    assert.equal(window.scrollY, 0);
     assert.equal(second.textContent, 'ㄱㆎ한');
 });
 
@@ -898,8 +921,8 @@ for (const vertical of [true, false]) {
             writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
             restoreMessages,
         });
-        window.scrollX = vertical ? -800 : 0;
-        window.scrollY = vertical ? 0 : 800;
+        body.scrollLeft = vertical ? -800 : 0;
+        body.scrollTop = vertical ? 0 : 800;
         text.rangeRects = (start, end) => {
             assert.equal(start, 1);
             assert.equal(end, 3);
@@ -908,8 +931,10 @@ for (const vertical of [true, false]) {
 
         await reader.restoreProgress(0.25);
 
-        assert.equal(window.scrollX, vertical ? -1141 : 0);
-        assert.equal(window.scrollY, vertical ? 0 : 920);
+        assert.equal(body.scrollLeft, vertical ? -1141 : 0);
+        assert.equal(body.scrollTop, vertical ? 0 : 920);
+        assert.equal(window.scrollX, 0);
+        assert.equal(window.scrollY, 0);
         assert.equal(body.firstChild, text);
         assert.equal(text.textContent, '前𠮟가後');
         assert.deepEqual(restoreMessages, ['restore-token']);
@@ -947,8 +972,8 @@ for (const vertical of [true, false]) {
 
         await reader.restoreProgress(1 / 8);
 
-        assert.equal(window.scrollX, vertical ? -305 : 0);
-        assert.equal(window.scrollY, vertical ? 0 : 85);
+        assert.equal(body.scrollLeft, vertical ? -305 : 0);
+        assert.equal(body.scrollTop, vertical ? 0 : 85);
     });
 }
 
@@ -1385,8 +1410,8 @@ test('continuous vertical Sasayaki chapter-end media stop plan follows forward s
     body.appendChild(imgAt(0, 500, 120, 420));
     body.appendChild(imgAt(0, 500, -520, -220));
     const { reader, document } = loadReader(body, readerContinuousUrl, { writingMode: 'vertical-rl' });
-    document.documentElement.scrollWidth = 3_000;
-    document.documentElement.scrollLeft = -480;
+    body.scrollWidth = 3_000;
+    body.scrollLeft = -480;
 
     const stops = reader.sasayakiMediaStopsToChapterEnd();
 
@@ -1694,3 +1719,68 @@ for (const sourceUrl of [readerPaginatedUrl, readerContinuousUrl]) {
         assert.equal(text(), '');
     });
 }
+
+
+for (const vertical of [true, false]) {
+    test(`continuous ${vertical ? 'vertical' : 'horizontal'} navigation scrolls only the inset body viewport`, () => {
+        const body = new TestElement('body');
+        body.rect = vertical ? testRect(0, 800, 48, 432) : testRect(80, 720, 0, 480);
+        body.clientWidth = vertical ? 384 : 480;
+        body.clientHeight = vertical ? 800 : 640;
+        body.scrollWidth = vertical ? 2_000 : 480;
+        body.scrollHeight = vertical ? 800 : 2_000;
+        const { reader, window } = loadReader(body, readerContinuousUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+        });
+
+        assert.equal(reader.paginate('forward'), 'scrolled');
+        assert.equal(body.scrollLeft, vertical ? -384 : 0);
+        assert.equal(body.scrollTop, vertical ? 0 : 640);
+        assert.equal(window.scrollX, 0);
+        assert.equal(window.scrollY, 0);
+        assert.equal(reader.sasayakiScrollTargetForRect(testRect(100, 120, 400, 420)), vertical ? -396 : 660);
+        assert.equal(reader.sasayakiCueRectIsVisible(testRect(10, 30, 440, 460)), false);
+        assert.equal(reader.sasayakiCueRectIsVisible(testRect(100, 120, 100, 120)), true);
+    });
+
+    test(`continuous ${vertical ? 'vertical' : 'horizontal'} chapter boundaries use body scroll extent`, () => {
+        const body = new TestElement('body');
+        body.scrollWidth = vertical ? 1_480 : 480;
+        body.scrollHeight = vertical ? 800 : 1_800;
+        const { reader } = loadReader(body, readerContinuousUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+        });
+        assert.equal(reader.isAtChapterBoundary('backward'), true);
+        assert.equal(reader.isAtChapterBoundary('forward'), false);
+        body.scrollLeft = vertical ? -500 : 0;
+        body.scrollTop = vertical ? 0 : 500;
+        assert.equal(reader.isAtChapterBoundary('backward'), false);
+        assert.equal(reader.isAtChapterBoundary('forward'), false);
+        body.scrollLeft = vertical ? -1_000 : 0;
+        body.scrollTop = vertical ? 0 : 1_000;
+        assert.equal(reader.isAtChapterBoundary('forward'), true);
+    });
+
+    test(`continuous progress measures the inset ${vertical ? 'right' : 'top'} content edge`, () => {
+        const body = new TestElement('body');
+        body.rect = vertical ? testRect(0, 800, 48, 432) : testRect(80, 720, 0, 480);
+        const text = new TestText('前後');
+        text.rangeRects = (start, end) => (vertical
+            ? [testRect(0, 20, 440, 460), testRect(0, 20, 400, 420)]
+            : [testRect(50, 70), testRect(100, 120)]).slice(start, end);
+        body.appendChild(text);
+        const { reader } = loadReader(body, readerContinuousUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+        });
+        assert.equal(reader.calculateProgress(), 0.5);
+    });
+}
+
+test('continuous body scroll reports the current document token', () => {
+    const messages = [];
+    const body = new TestElement('body');
+    const { reader } = loadReader(body, readerContinuousUrl, { scrollMessages: messages });
+    reader.initialize();
+    body.listeners?.get('scroll')?.();
+    assert.deepEqual(messages, ['restore-token']);
+});

@@ -134,6 +134,18 @@ class ReaderPaginationScriptsTest {
     }
 
     @Test
+    fun continuousImageBoundsUseTheInsetBodyViewport() {
+        val vertical = readerViewportCssLayout(ReaderSettings(viewMode = ReaderViewMode.Continuous,
+            verticalWriting = true, horizontalPadding = 30, verticalPadding = 0), 480, 800)
+        assertEquals(335, vertical.imageMaxWidthPx)
+        assertEquals(800, vertical.visibleHeightPx)
+        val horizontal = readerViewportCssLayout(ReaderSettings(viewMode = ReaderViewMode.Continuous,
+            verticalWriting = false, horizontalPadding = 0, verticalPadding = 30), 480, 800)
+        assertEquals(560, horizontal.visibleHeightPx)
+        assertEquals(392, horizontal.imageMaxHeightPx)
+    }
+
+    @Test
     fun sasayakiHighlightCommandCarriesCueRangeForLazyWrapping() {
         val command = ReaderPaginationScripts.highlightSasayakiCueInvocation(
             cue = SasayakiCueRange(id = "cue\"1", start = 42, length = 7),

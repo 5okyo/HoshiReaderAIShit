@@ -1161,3 +1161,25 @@ test('menu recovery targets selected text away from both handles regardless of t
             `Recovery must reach the selection interior instead of pressing an endpoint handle: ${JSON.stringify({vertical,fragmented,point})}`);
     }
 });
+
+test('continuous reader padding taps never select nearby text', () => {
+    const { selection, window } = loadSelection('読書');
+    window.hoshiReader = { contentViewport: () => ({ left: 40, right: 360, top: 80, bottom: 720 }) };
+    window.getSelection = () => ({ removeAllRanges() {} });
+    selection.getCharacterAtPoint = () => assert.fail('Padding cannot request a text caret');
+    for (const [x, y] of [[1, 100], [399, 100], [100, 1], [100, 799]]) {
+        assert.equal(selection.selectText(x, y, 20), null);
+    }
+});
+
+test('continuous native menu clips to the body viewport while retaining full WebView coordinates', () => {
+    const { selection, window } = loadSelection('読書');
+    window.hoshiReader = { contentViewport: () => ({ left: 40, right: 360, top: 80, bottom: 720 }) };
+    const range = {
+        getClientRects: () => [{ left: 20, right: 380, top: 50, bottom: 750 }],
+        cloneRange: () => ({ collapse() {}, getBoundingClientRect: () => ({ left: 0, right: 0, top: 0, bottom: 0 }) }),
+    };
+    window.getSelection = () => ({ isCollapsed: false, rangeCount: 1, toString: () => '読書', getRangeAt: () => range });
+    assert.deepEqual(JSON.parse(JSON.stringify(selection.nativeSelectionMenuRect())),
+        { left: 40, right: 360, top: 80, bottom: 720, viewportWidth: 400 });
+});

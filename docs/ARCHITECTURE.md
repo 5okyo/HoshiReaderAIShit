@@ -331,6 +331,16 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   Continuous restore aligns live text and its same-line ruby geometry without
   inserting layout markers. Progress uses glyph centers to exclude clipped
   slivers of adjacent lines, keeping repeated save/restore stable at tight line heights.
+  Continuous mode keeps the WebView at the full reading-region size and scrolls
+  an inset, fixed-position `body`; popup iframe shells stay outside that body.
+  The continuous runtime owns content bounds, scroll operations and chapter-edge
+  checks. It sets measured CSS pixel dimensions before restore, so initial layout
+  does not depend on WebView's first-frame viewport-unit resolution. Selection
+  and source-highlight clipping use those content bounds in full-WebView coordinates.
+  `HoshiReaderScroll` reports body scrolls with the current document token to the
+  existing throttled progress/idle-save scheduler. Boundary-swipe replies reject
+  replaced documents, listeners and gestures; rebinding unchanged reader settings
+  retains the touch listener through progress recompositions.
   Paginated page height and page steps use the visible WebView viewport height;
   vertical padding and column gaps contain only configured user spacing, with
   no extra font-size overlap strip.

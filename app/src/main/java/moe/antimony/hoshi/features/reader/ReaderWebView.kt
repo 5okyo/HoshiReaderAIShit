@@ -1868,11 +1868,9 @@ fun ReaderWebView(
                 ),
         ) {
             BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                val viewportHorizontalPadding = maxWidth * effectiveSettings.continuousViewportHorizontalPaddingRatio.toFloat()
-                val viewportVerticalPadding = maxHeight * effectiveSettings.continuousViewportVerticalPaddingRatio.toFloat()
                 val readerLookupPopupViewport = ReaderLookupPopupViewport(
-                    width = (maxWidth.value - viewportHorizontalPadding.value * 2f).coerceAtLeast(0f).toDouble(),
-                    height = (maxHeight.value - viewportVerticalPadding.value * 2f).coerceAtLeast(0f).toDouble(),
+                    width = maxWidth.value.toDouble(),
+                    height = maxHeight.value.toDouble(),
                 )
                 val readerRootSelectionHighlightPayload = remember(
                     rootSelectionHighlight,
@@ -2018,12 +2016,7 @@ fun ReaderWebView(
                                     chapterIndex = readerPosition.loadPosition.index,
                                 )
                             },
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(
-                                    horizontal = viewportHorizontalPadding,
-                                    vertical = viewportVerticalPadding,
-                                ),
+                            modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }

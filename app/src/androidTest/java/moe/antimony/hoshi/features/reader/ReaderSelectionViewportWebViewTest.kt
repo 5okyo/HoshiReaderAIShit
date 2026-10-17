@@ -580,6 +580,83 @@ class ReaderSelectionViewportWebViewTest {
         }
     }
 
+    @Test
+    fun continuousNativeHandleAutoScrollsTheInsetBodyInBothWritingDirections() {
+        val webView = createWebView()
+        try {
+            for (vertical in listOf(true, false)) {
+                val settings = ReaderSettings(viewMode = ReaderViewMode.Continuous, verticalWriting = vertical,
+                    horizontalPadding = 30, verticalPadding = 30, fontSize = 27)
+                val assets = ReaderWebAssets.load(instrumentation.targetContext)
+                val loaded = CountDownLatch(1)
+                var chapters = 0
+                instrumentation.runOnMainSync {
+                    webView.prepareForDocument("continuous-$vertical")
+                    val listener = ContinuousScrollTouchListener(settings,
+                        shouldIgnoreReaderGesture = { webView.isNativeSelectionActive() },
+                        onTap = { _, _ -> }, onScrollGesture = {},
+                        onNextChapter = { chapters++; true }, onPreviousChapter = { chapters--; true })
+                    webView.bindReaderTouchListener(settings) { listener }
+                    webView.webViewClient = object : WebViewClient() {
+                        override fun onPageFinished(view: WebView, url: String) { loaded.countDown() }
+                    }
+                    val styles = ReaderContentStyles.styleTag(settings = settings, readerCssTemplate = assets.readerCss)
+                    val script = ReaderPaginationScripts.shellScript(settings = settings, assets = assets)
+                    webView.loadDataWithBaseURL(null, """
+                        <!doctype html><html><head>$styles$script
+                        <script>window.HoshiReaderRestore={postMessage:()=>window.testRestored=true};
+                        ${assets.selectionJs}
+                        hoshiSelection.configure({bridge:'android-reader',nativeSelectionToken:'continuous-$vertical'});
+                        </script></head><body><p>${"読書の時間です。文章を読み続けます。".repeat(600)}</p></body></html>
+                    """.trimIndent(), "text/html", "utf-8", null)
+                }
+                assertTrue(loaded.await(15, TimeUnit.SECONDS))
+                composeRule.waitUntil(15_000) { evaluate(webView, "Boolean(window.testRestored)") == "true" }
+                evaluate(webView, "hoshiReader.paginate('forward');hoshiReader.paginate('forward');true")
+                val bounds = JSONObject(evaluate(webView, "hoshiReader.contentViewport().toJSON()"))
+                val location = IntArray(2)
+                var density = 1f
+                instrumentation.runOnMainSync {
+                    webView.getLocationOnScreen(location)
+                    density = webView.resources.displayMetrics.density
+                }
+                fun x(value: Double) = location[0] + value.toFloat() * density
+                fun y(value: Double) = location[1] + value.toFloat() * density
+                val hit = JSONObject(evaluate(webView, """
+                    (()=>{const b=hoshiReader.contentViewport(),r=document.caretRangeFromPoint(
+                        (b.left+b.right)/2,(b.top+b.bottom)/2);
+                        r.setEnd(r.startContainer,r.startOffset+1);return r.getBoundingClientRect().toJSON();})()
+                """.trimIndent()))
+                gesture(x((hit.getDouble("left") + hit.getDouble("right")) / 2),
+                    y((hit.getDouble("top") + hit.getDouble("bottom")) / 2), duration = 900)
+                composeRule.waitUntil(3000) { webView.nativeSelectionState.value }
+                val before = evaluate(webView, "hoshiReader.sasayakiScrollPosition()").toDouble()
+                val endpoint = JSONObject(evaluate(webView, """
+                    (()=>{const rects=[...getSelection().getRangeAt(0).getClientRects()].filter(r=>r.width&&r.height);
+                        return rects[$vertical?rects.length-1:0].toJSON();})()
+                """.trimIndent()))
+                // Vertical end handle moves forward; horizontal start handle moves backward.
+                // Start mid-chapter so either edge has content available for native auto-scroll.
+                gesture(x(if (vertical) endpoint.getDouble("left") + 6 else endpoint.getDouble("left") - 6),
+                    y(endpoint.getDouble("bottom") + 10),
+                    x(if (vertical) 5.0 else (bounds.getDouble("left") + bounds.getDouble("right")) / 2),
+                    y(if (vertical) (bounds.getDouble("top") + bounds.getDouble("bottom")) / 2 else 5.0),
+                    duration = 1200, holdMillis = 1000)
+                val after = evaluate(webView, "hoshiReader.sasayakiScrollPosition()").toDouble()
+                assertTrue("Native handle scrolls the continuous body: vertical=$vertical before=$before after=$after", kotlin.math.abs(after - before) > 1)
+                assertTrue("Native selection survives scrolling", evaluate(webView, "!getSelection().isCollapsed && getSelection().toString().length>0").toBoolean())
+                assertEquals("Handle drag never changes chapter", 0, chapters)
+                assertEquals("Window stays still", "0", evaluate(webView, "Math.abs(scrollX)+Math.abs(scrollY)"))
+                val menu = JSONObject(evaluate(webView, "hoshiSelection.nativeSelectionMenuRect()"))
+                assertTrue("Menu remains inside the body", menu.getDouble("left") >= bounds.getDouble("left") - 1 &&
+                    menu.getDouble("right") <= bounds.getDouble("right") + 1 && menu.getDouble("top") >= bounds.getDouble("top") - 1 &&
+                    menu.getDouble("bottom") <= bounds.getDouble("bottom") + 1)
+                evaluate(webView, "getSelection().removeAllRanges();true")
+                composeRule.waitUntil(3000) { !webView.nativeSelectionState.value }
+            }
+        } finally { destroyFixture(webView) }
+    }
+
     private fun createWebView(): HoshiReaderWebView {
         lateinit var webView: HoshiReaderWebView
         composeRule.setContent {
@@ -638,7 +715,7 @@ class ReaderSelectionViewportWebViewTest {
         """.trimIndent())
     }
 
-    private fun gesture(x: Float, y: Float, endX: Float = x, endY: Float = y, duration: Long) {
+    private fun gesture(x: Float, y: Float, endX: Float = x, endY: Float = y, duration: Long, holdMillis: Long = 0) {
         val start = SystemClock.uptimeMillis()
         fun send(action: Int, px: Float, py: Float) {
             val event = MotionEvent.obtain(start, SystemClock.uptimeMillis(), action, 1,
@@ -657,6 +734,7 @@ class ReaderSelectionViewportWebViewTest {
             SystemClock.sleep(duration / 40)
             send(MotionEvent.ACTION_MOVE, x + (endX - x) * step / 40, y + (endY - y) * step / 40)
         }
+        if (holdMillis > 0) SystemClock.sleep(holdMillis)
         send(MotionEvent.ACTION_UP, endX, endY)
     }
 

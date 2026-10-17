@@ -540,6 +540,21 @@ Manual reader validation should cover:
   duplicate state, redirect history, audio/autoplay errors, Anki actions,
   Sasayaki controls, dictionary media images, outside tap dismissal, and
   absence of invisible touch blockers after dismissal.
+- Full-width lookup popups remain at the complete reading-region edges with zero,
+  default and enlarged reader padding: check continuous vertical left/right margins
+  and horizontal top/bottom margins, plus paginated/VN regression cases. Popup borders
+  keep the existing 6 CSS px gap; configured height only clamps to the available
+  region. Scroll first, then check root/recursive lookup anchors, source highlights,
+  native selection and blank-margin taps at popup scales 0.8/1/2.
+  `ReaderContinuousPopupViewportWebViewTest` uses generated chapters and isolated
+  WebViews to cover all three modes, body scrolling, stale document/gesture replies
+  and bridge release. `ReaderSelectionViewportWebViewTest` also drags native handles
+  beyond inset body edges in both continuous writing directions, checking auto-scroll,
+  retained selection and menu bounds without a chapter turn.
+  Continuous fixtures must scroll the runtime's body viewport,
+  not `window`; assert its measured dimensions before testing restore so an initial
+  zero-height viewport cannot pass as an empty chapter. Run via data-preserving APK
+  installation and the explicit instrumentation runner.
 - volume-key popup term navigation in paginated, continuous, and VN modes:
   verify the root or topmost recursive popup takes priority over enabled page
   turns and Sasayaki/TTS seeking, default and reversed directions reach adjacent

@@ -30,6 +30,13 @@
         return layer;
     }
 
+    function applyReaderHighlightClip(layer) {
+        const viewport = window.hoshiReader?.contentViewport?.();
+        layer.style.clipPath = viewport
+            ? `inset(${viewport.top}px ${window.innerWidth - viewport.right}px ${window.innerHeight - viewport.bottom}px ${viewport.left}px)`
+            : '';
+    }
+
     function ensureHighlightLayer() {
         const layer = ensureLayer();
         let highlightLayer = layer.querySelector('.hoshi-reader-selection-highlight-layer');
@@ -411,6 +418,7 @@
             return;
         }
         const layer = ensureSasayakiHighlightLayer();
+        applyReaderHighlightClip(layer);
         const verticalWriting = sasayakiHighlight.verticalWriting ?? readerVerticalWriting();
         const color = readerEInkLineColor(!!sasayakiHighlight.darkMode);
         const rects = highlightBoxRects(
@@ -578,6 +586,7 @@
             return;
         }
         const layer = ensureHighlightLayer();
+        applyReaderHighlightClip(layer);
         layer.replaceChildren();
         const color = rootHighlight.eInkMode
             ? (rootHighlight.darkMode ? '#fff' : '#000')

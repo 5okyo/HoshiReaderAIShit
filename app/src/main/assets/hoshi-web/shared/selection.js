@@ -221,6 +221,21 @@ window.hoshiSelection = {
             (window.getComputedStyle(document.body).writingMode === "vertical-rl");
     },
 
+    contentViewport() {
+        return window.hoshiReader?.contentViewport?.() ??
+            { left: 0, top: 0, right: innerWidth, bottom: innerHeight };
+    },
+
+    clipToContentViewport(rect) {
+        const viewport = window.hoshiReader?.contentViewport?.();
+        if (!viewport) return rect;
+        const left = Math.max(viewport.left, rect.x);
+        const top = Math.max(viewport.top, rect.y);
+        const right = Math.min(viewport.right, rect.x + rect.width);
+        const bottom = Math.min(viewport.bottom, rect.y + rect.height);
+        return right > left && bottom > top ? { x: left, y: top, width: right - left, height: bottom - top } : null;
+    },
+
     languagePolicy() {
         const configured = String(
             this.options.language ||
@@ -578,6 +593,11 @@ window.hoshiSelection = {
     },
 
     selectText(x, y, maxLength, rectX = x, rectY = y) {
+        const viewport = window.hoshiReader?.contentViewport?.();
+        if (viewport && (x < viewport.left || x >= viewport.right || y < viewport.top || y >= viewport.bottom)) {
+            this.clearSelection();
+            return null;
+        }
         const hitElement = document.elementFromPoint(x, y);
         if (hitElement?.closest('a')) {
             return this.linkTapResult();
@@ -705,7 +725,7 @@ window.hoshiSelection = {
         const rect = rects.find(rect => x >= rect.x && x <= rect.x + rect.width && y >= rect.y && y <= rect.y + rect.height) ??
             rects[0] ??
             window.hoshiRubyGeometry.rectObject(range.getBoundingClientRect());
-        return this.selectionRectForBridge(rect);
+        return this.selectionRectForBridge(this.clipToContentViewport(rect) ?? rect);
     },
 
     selectionRects(charCount) {
@@ -719,7 +739,8 @@ window.hoshiSelection = {
         }
 
         const merged = this.mergeSelectionRects(rects);
-        return this.options.rubyAwareRects ? this.unifyVerticalColumnRects(merged) : merged;
+        const visible = this.options.rubyAwareRects ? this.unifyVerticalColumnRects(merged) : merged;
+        return visible.map(rect => this.clipToContentViewport(rect)).filter(Boolean);
     },
 
     rectsForRange(range) {
@@ -900,8 +921,9 @@ window.hoshiSelection = {
             return caret && !caret.startContainer.parentElement?.closest('rt, rp') &&
                 range.comparePoint(caret.startContainer, caret.startOffset) === 0;
         };
-        if (event.clientX >= 0 && event.clientX < innerWidth &&
-            event.clientY >= 0 && event.clientY < innerHeight &&
+        const viewport = this.contentViewport();
+        if (event.clientX >= viewport.left && event.clientX < viewport.right &&
+            event.clientY >= viewport.top && event.clientY < viewport.bottom &&
             selectedCaretAt(event.clientX, event.clientY)) return;
         // Chromium can use a previous column's caret coordinates after a handle
         // drag. Recover only at a visible point verified to belong to this range.
@@ -914,8 +936,8 @@ window.hoshiSelection = {
         let point = null, clearance = -1;
         const vertical = this.isVertical();
         for (const rect of range.getClientRects()) {
-            const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
-            const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
+            const left = Math.max(viewport.left, rect.left), top = Math.max(viewport.top, rect.top);
+            const right = Math.min(viewport.right, rect.right), bottom = Math.min(viewport.bottom, rect.bottom);
             if (right <= left || bottom <= top) continue;
             // A vertical start handle extends into a short selected glyph from
             // the right. Its left interior stays above the end handle instead.
@@ -979,9 +1001,10 @@ window.hoshiSelection = {
         // near the top, especially when the end includes a paragraph's period.
         const range = selection.getRangeAt(0);
         let bounds = null;
+        const viewport = this.contentViewport();
         const includeRect = rect => {
-            const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
-            const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
+            const left = Math.max(viewport.left, rect.left), top = Math.max(viewport.top, rect.top);
+            const right = Math.min(viewport.right, rect.right), bottom = Math.min(viewport.bottom, rect.bottom);
             if (right <= left || bottom <= top) return;
             if (!bounds) bounds = { left, top, right, bottom, viewportWidth: innerWidth };
             else {

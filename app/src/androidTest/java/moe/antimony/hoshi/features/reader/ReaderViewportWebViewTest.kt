@@ -98,12 +98,14 @@ class ReaderViewportWebViewTest {
         }
         composeRule.waitForIdle()
         try {
-            for (vertical in listOf(true, false)) for (font in listOf(22, 36)) for (lineHeight in listOf(1.0, 1.75)) {
-                val label = "vertical=$vertical font=$font lineHeight=$lineHeight"
+            for (vertical in listOf(true, false)) for (font in listOf(22, 36)) for (lineHeight in listOf(1.0, 1.75)) for (padding in listOf(0, 30)) {
+                val label = "vertical=$vertical font=$font lineHeight=$lineHeight padding=$padding"
                 val settings = ReaderSettings(
                     viewMode = ReaderViewMode.Continuous,
                     verticalWriting = vertical,
                     fontSize = font,
+                    horizontalPadding = padding,
+                    verticalPadding = padding,
                     layoutAdvanced = true,
                     lineHeight = lineHeight,
                 )
@@ -131,11 +133,12 @@ class ReaderViewportWebViewTest {
                         const rects = Array.from(range.getClientRects());
                         const right = Math.max(...rects.map(rect => rect.right));
                         const top = Math.min(...rects.map(rect => rect.top));
-                        scrollBy({left: r.isVertical() ? right - innerWidth : 0,
-                            top: r.isVertical() ? 0 : top, behavior: 'instant'});
+                        const viewport = r.contentViewport();
+                        r.scrollBy({left: r.isVertical() ? right - viewport.right : 0,
+                            top: r.isVertical() ? 0 : top - viewport.top, behavior: 'instant'});
                         window.testProgress = r.calculateProgress();
                         const style = getComputedStyle(document.body);
-                        return {position: r.isVertical() ? scrollX : scrollY, progress: window.testProgress,
+                        return {position: r.isVertical() ? document.body.scrollLeft : document.body.scrollTop, progress: window.testProgress,
                             fontSize: parseFloat(style.fontSize), lineHeight: parseFloat(style.lineHeight)};
                     })()
                 """.trimIndent()))
@@ -152,8 +155,8 @@ class ReaderViewportWebViewTest {
                             const rt = document.querySelector('#anchor rt').getBoundingClientRect();
                             window.testProgress = r.calculateProgress();
                             return {
-                            position: r.isVertical() ? scrollX : scrollY, progress: window.testProgress,
-                            annotationVisible: r.isVertical() ? rt.right <= innerWidth + 1 : rt.top >= -1
+                            position: r.isVertical() ? document.body.scrollLeft : document.body.scrollTop, progress: window.testProgress,
+                            annotationVisible: r.isVertical() ? rt.right <= r.contentViewport().right + 1 : rt.top >= r.contentViewport().top - 1
                         }; })()
                     """.trimIndent()))
                     assertEquals("$label restore $it", before.getDouble("position"), after.getDouble("position"), 1.0)

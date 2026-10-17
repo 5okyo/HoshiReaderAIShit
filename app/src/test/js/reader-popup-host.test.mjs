@@ -887,3 +887,24 @@ test('TTS popup controls are visible without an audiobook and dispatch only TTS 
     host.renderStack({ popups: [{ ...payload, ttsWasPaused: false }] });
     assert.match(document.querySelectorAll('.hoshi-reader-popup-sasayaki-bar')[0].children[1].style['--icon-url'], /play_arrow.svg/);
 });
+
+test('continuous reader clips source highlight layers without clipping popup frames', () => {
+    const scene = popupHost();
+    scene.window.innerWidth = 400;
+    scene.window.innerHeight = 800;
+    scene.window.hoshiReader = { contentViewport: () => ({ left: 40, top: 80, right: 360, bottom: 720 }) };
+    scene.document.documentElement.style['--hoshi-reader-eink-mode'] = '1';
+    scene.host.renderStack({
+        popups: [rootPopupPayload()],
+        rootHighlight: { popupId: 'root', pending: false, rects: [{ x: 20, y: 60, width: 360, height: 700 }] },
+    });
+    scene.dispatchMessage({ source: 'hoshi-popup-iframe', name: 'contentReady', popupId: 'root' });
+    scene.host.renderSasayakiHighlight({
+        eInkMode: true, verticalWriting: true, rects: [{ x: 20, y: 60, width: 360, height: 700 }],
+    });
+    const layer = scene.document.getElementById('hoshi-reader-popup-layer');
+    assert.equal(layer.querySelector('.hoshi-reader-selection-highlight-layer').style.clipPath, 'inset(80px 40px 80px 40px)');
+    assert.equal(layer.querySelector('.hoshi-reader-sasayaki-highlight-layer').style.clipPath, 'inset(80px 40px 80px 40px)');
+    assert.equal(layer.querySelector('.hoshi-reader-popup-shell').style.left, '0px');
+    assert.equal(layer.querySelector('.hoshi-reader-popup-shell').style.clipPath, undefined);
+});
