@@ -879,12 +879,19 @@ window.hoshiSelection = {
 
     nativeMenuAnchorRequest: null,
     nativeMenuRecovery: null,
+    nativeMenuRecoveryReplay: null,
     nativeMenuRecoverySequence: 0,
 
     recoverNativeSelectionMenu(event) {
         const bridge = window.HoshiNativeSelection;
+        // Chromium's handle adjustments report pointerType "mouse", button -1.
+        // A touch/pen contextmenu belongs to a long press still in progress:
+        // injecting another DOWN would interrupt it before the user's release.
         if (this.options.bridge !== 'android-reader' || !bridge?.recoverMenu ||
-            !event.isTrusted || event.button === 2) return;
+            !event.isTrusted || event.pointerType !== 'mouse' || event.button === 2) return;
+        // Chromium can repeat the same bad anchor for the recovery long press.
+        // Let that gesture open its menu instead of recursively replacing it.
+        if (this.nativeMenuRecoveryReplay !== null) return;
         const selection = window.getSelection();
         if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString()) return;
         const range = selection.getRangeAt(0);
@@ -898,30 +905,64 @@ window.hoshiSelection = {
             selectedCaretAt(event.clientX, event.clientY)) return;
         // Chromium can use a previous column's caret coordinates after a handle
         // drag. Recover only at a visible point verified to belong to this range.
+        const endpoints = [true, false].map(start => {
+            const caret = range.cloneRange();
+            caret.collapse(start);
+            const rect = caret.getBoundingClientRect();
+            return { x: (rect.left + rect.right) / 2, y: (rect.top + rect.bottom) / 2 };
+        });
+        let point = null, clearance = -1;
+        const vertical = this.isVertical();
         for (const rect of range.getClientRects()) {
             const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
             const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
             if (right <= left || bottom <= top) continue;
-            const x = (left + right) / 2, y = (top + bottom) / 2;
-            if (!selectedCaretAt(x, y)) continue;
-            const id = ++this.nativeMenuRecoverySequence;
-            this.nativeMenuRecovery = { id, point: { x, y, viewportWidth: innerWidth } };
-            event.preventDefault();
-            bridge.recoverMenu(id, this.options.nativeSelectionToken);
-            return;
+            // A vertical start handle extends into a short selected glyph from
+            // the right. Its left interior stays above the end handle instead.
+            const x = vertical ? Math.min(left + 1, (left + right) / 2) : (left + right) / 2;
+            const y = (top + bottom) / 2;
+            // A fragmented range's first glyph can overlap the native start
+            // handle. Pressing it re-enters handle dragging and keeps the menu
+            // hidden. Prefer the selected fragment furthest from both carets.
+            const distance = Math.min(...endpoints.map(p => (x - p.x) ** 2 + (y - p.y) ** 2));
+            if (distance <= clearance || !selectedCaretAt(x, y)) continue;
+            point = { x, y, viewportWidth: innerWidth };
+            clearance = distance;
         }
+        if (!point) return;
+        const id = ++this.nativeMenuRecoverySequence;
+        this.nativeMenuRecovery = { id, point,
+            endpoints: [selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset] };
+        event.preventDefault();
+        bridge.recoverMenu(id, this.options.nativeSelectionToken);
     },
 
     takeNativeMenuRecovery(id, anchorRequest) {
         if (this.nativeMenuRecovery?.id !== id) return null;
         this.nativeMenuAnchorRequest = anchorRequest;
-        const point = this.nativeMenuRecovery.point;
+        const recovery = this.nativeMenuRecovery;
         this.nativeMenuRecovery = null;
-        return point;
+        this.nativeMenuRecoveryReplay = recovery;
+        return recovery.point;
     },
 
-    invalidateNativeMenuAnchor() {
+    cancelNativeMenuRecoveryReplay(id, documentToken) {
+        if (this.options.nativeSelectionToken !== documentToken) return;
+        if (this.nativeMenuRecoveryReplay?.id === id) this.nativeMenuRecoveryReplay = null;
+        if (this.nativeMenuRecovery?.id === id) this.nativeMenuRecovery = null;
+    },
+
+    invalidateNativeMenuAnchor(selectionChanged = false) {
+        const recovery = this.nativeMenuRecovery || this.nativeMenuRecoveryReplay;
+        const selection = selectionChanged && recovery ? window.getSelection() : null;
+        if (recovery && selection && !selection.isCollapsed) {
+            const endpoints = [selection.anchorNode, selection.anchorOffset, selection.focusNode, selection.focusOffset];
+            // A handle's contextmenu can precede its final duplicate selectionchange.
+            // Keep the queued point/replay until the endpoints actually change.
+            if (recovery.endpoints.every((value, index) => value === endpoints[index])) return;
+        }
         this.nativeMenuRecovery = null;
+        this.nativeMenuRecoveryReplay = null;
         const request = this.nativeMenuAnchorRequest;
         if (request == null) return;
         this.nativeMenuAnchorRequest = null;
@@ -933,12 +974,15 @@ window.hoshiSelection = {
         const selection = window.getSelection();
         if (!selection || selection.isCollapsed || !selection.rangeCount || !selection.toString()) return null;
         // Read only when Android receives an unusable native menu anchor, never
-        // while tracking selection handles. Clip each fragment before unioning.
+        // while tracking selection handles. Match its endpoint-based placement:
+        // the intervening columns can fill the screen while both handles are
+        // near the top, especially when the end includes a paragraph's period.
+        const range = selection.getRangeAt(0);
         let bounds = null;
-        for (const rect of selection.getRangeAt(0).getClientRects()) {
+        const includeRect = rect => {
             const left = Math.max(0, rect.left), top = Math.max(0, rect.top);
             const right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
-            if (right <= left || bottom <= top) continue;
+            if (right <= left || bottom <= top) return;
             if (!bounds) bounds = { left, top, right, bottom, viewportWidth: innerWidth };
             else {
                 bounds.left = Math.min(bounds.left, left);
@@ -946,7 +990,21 @@ window.hoshiSelection = {
                 bounds.right = Math.max(bounds.right, right);
                 bounds.bottom = Math.max(bounds.bottom, bottom);
             }
+        };
+        for (const start of [true, false]) {
+            const caret = range.cloneRange();
+            caret.collapse(start);
+            const rect = caret.getBoundingClientRect();
+            if (rect.right <= rect.left && rect.bottom <= rect.top) continue;
+            // A caret has zero extent in the writing direction. Keep its anchor
+            // nonempty so Android can position the floating menu.
+            includeRect({ left: rect.left, top: rect.top,
+                right: Math.max(rect.right, rect.left + 1), bottom: Math.max(rect.bottom, rect.top + 1) });
         }
+        if (bounds) return bounds;
+        // Both endpoints may be offscreen or have no geometry at element
+        // boundaries. In that case use the remaining visible selected fragments.
+        for (const rect of range.getClientRects()) includeRect(rect);
         return bounds;
     },
 
@@ -984,7 +1042,7 @@ document.addEventListener('contextmenu', event => window.hoshiSelection.recoverN
 document.addEventListener('scroll', () => window.hoshiSelection.invalidateNativeMenuAnchor(), true);
 window.addEventListener?.('resize', () => window.hoshiSelection.invalidateNativeMenuAnchor());
 document.addEventListener('selectionchange', () => {
-    window.hoshiSelection.invalidateNativeMenuAnchor();
+    window.hoshiSelection.invalidateNativeMenuAnchor(true);
     const s = getSelection();
     const hasSelection = !!s && !s.isCollapsed;
     if (hasSelection === lastHasSelection) return;

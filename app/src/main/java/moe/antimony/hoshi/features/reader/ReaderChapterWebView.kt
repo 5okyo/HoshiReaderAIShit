@@ -16,6 +16,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.View.MeasureSpec
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
@@ -629,6 +630,15 @@ internal class HoshiReaderWebView(context: Context) : WebView(context) {
     private var nativeSelectionFallbackRect: Rect? = null
     private var nativeSelectionAnchorRequested = false
     private var nativeSelectionAnchorGeneration = 0
+    private data class SelectionMenuRecoveryRequest(val id: Int, val documentToken: String)
+    private data class SelectionMenuRecoveryTouch(val downTime: Long, val x: Float, val y: Float)
+    private var selectionMenuRecoveryRequest: SelectionMenuRecoveryRequest? = null
+    private var selectionMenuRecoveryTouch: SelectionMenuRecoveryTouch? = null
+    private val finishSelectionMenuRecoveryTouch = Runnable {
+        val touch = selectionMenuRecoveryTouch ?: return@Runnable
+        selectionMenuRecoveryTouch = null
+        dispatchSelectionMenuRecoveryTouch(touch, MotionEvent.ACTION_UP)
+    }
     private var highlightColorPopup: PopupWindow? = null
     private var selectionHighlightPending = false
 
@@ -639,6 +649,7 @@ internal class HoshiReaderWebView(context: Context) : WebView(context) {
                 post {
                     if (!isReleased && tag == restoreToken) {
                         documentHasSelection = active
+                        if (!active) cancelSelectionMenuRecoveryTouch()
                         updateNativeSelectionActivity()
                     }
                 }
@@ -656,6 +667,7 @@ internal class HoshiReaderWebView(context: Context) : WebView(context) {
                     if (!isReleased && tag == restoreToken && request == nativeSelectionAnchorGeneration) {
                         nativeSelectionFallbackRect = null
                         nativeSelectionAnchorGeneration++
+                        cancelSelectionMenuRecoveryTouch()
                         // Do not remeasure while handles are moving. A new native
                         // ActionMode may request a fresh anchor after the gesture.
                         nativeSelectionActionMode?.invalidateContentRect()
@@ -673,6 +685,7 @@ internal class HoshiReaderWebView(context: Context) : WebView(context) {
     }
 
     private fun clearNativeSelectionState() {
+        cancelSelectionMenuRecoveryTouch()
         documentHasSelection = false
         selectionHighlightPending = false
         nativeSelectionActionMode?.finish()
@@ -728,29 +741,79 @@ internal class HoshiReaderWebView(context: Context) : WebView(context) {
     }
 
     private fun recoverNativeSelectionMenu(request: Int, documentToken: String) {
+        if (selectionMenuRecoveryTouch != null) return
+        val recoveryRequest = SelectionMenuRecoveryRequest(request, documentToken)
+        selectionMenuRecoveryRequest = recoveryRequest
+        fun discardRequest() {
+            if (selectionMenuRecoveryRequest === recoveryRequest) cancelSelectionMenuRecoveryTouch()
+        }
         val mode = nativeSelectionActionMode
         val generation = nativeSelectionAnchorGeneration
         evaluateJavascript(ReaderSelectionCommand.TakeMenuRecovery(request, generation).source) { result ->
-            if (tag != documentToken || nativeSelectionActionMode !== mode ||
+            if (selectionMenuRecoveryRequest !== recoveryRequest ||
+                tag != documentToken || nativeSelectionActionMode !== mode ||
                 generation != nativeSelectionAnchorGeneration ||
-                !isAttachedToWindow || !hasWindowFocus()) return@evaluateJavascript
-            val point = ReaderNativeSelectionMenuPoint.fromJavascriptResult(result) ?: return@evaluateJavascript
+                selectionMenuRecoveryTouch != null ||
+                !isAttachedToWindow || !hasWindowFocus()) {
+                discardRequest()
+                return@evaluateJavascript
+            }
+            val point = ReaderNativeSelectionMenuPoint.fromJavascriptResult(result) ?: run {
+                discardRequest()
+                return@evaluateJavascript
+            }
             val scale = width / point.viewportWidth
             val x = (point.x * scale).toFloat()
             val y = (point.y * scale).toFloat()
-            if (x !in 0f..<width.toFloat() || y !in 0f..<height.toFloat()) return@evaluateJavascript
-            // Re-enter WebView's normal context-menu path at the selected text.
-            // Button events bypass reader touch gestures and preserve the range.
-            val now = SystemClock.uptimeMillis()
-            for (action in listOf(MotionEvent.ACTION_BUTTON_PRESS, MotionEvent.ACTION_BUTTON_RELEASE)) {
-                val event = MotionEvent.obtain(now, now, action, 1,
-                    arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_MOUSE }),
-                    arrayOf(MotionEvent.PointerCoords().apply { this.x = x; this.y = y }),
-                    0, if (action == MotionEvent.ACTION_BUTTON_PRESS) MotionEvent.BUTTON_SECONDARY else 0,
-                    1f, 1f, 0, 0, InputDevice.SOURCE_MOUSE, 0)
-                try { super.onGenericMotionEvent(event) } finally { event.recycle() }
+            if (x !in 0f..<width.toFloat() || y !in 0f..<height.toFloat()) {
+                discardRequest()
+                return@evaluateJavascript
             }
+            // A long press inside the selected range preserves it and lets WebView
+            // own its ActionMode. Mouse events instead open a separate dropdown on
+            // large screens, bypassing our Highlight/Replace ActionMode callback.
+            val touch = SelectionMenuRecoveryTouch(SystemClock.uptimeMillis(), x, y)
+            selectionMenuRecoveryTouch = touch
+            dispatchSelectionMenuRecoveryTouch(touch, MotionEvent.ACTION_DOWN)
+            // Chromium waits for tap timeout + long-press timeout. Ending at
+            // that threshold can race its timer and turn recovery into a tap.
+            val holdMillis = ViewConfiguration.getTapTimeout().toLong() + ViewConfiguration.getLongPressTimeout() + 100L
+            postDelayed(finishSelectionMenuRecoveryTouch, holdMillis)
         }
+    }
+
+    private fun dispatchSelectionMenuRecoveryTouch(touch: SelectionMenuRecoveryTouch, action: Int) {
+        val event = MotionEvent.obtain(touch.downTime, SystemClock.uptimeMillis(), action, 1,
+            arrayOf(MotionEvent.PointerProperties().apply { id = 0; toolType = MotionEvent.TOOL_TYPE_FINGER }),
+            arrayOf(MotionEvent.PointerCoords().apply {
+                x = touch.x; y = touch.y
+                pressure = if (action == MotionEvent.ACTION_DOWN) 1f else 0f
+            }),
+            0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+        // Bypass the app's page/tap listener; this gesture belongs to WebView.
+        try { super.onTouchEvent(event) } finally { event.recycle() }
+    }
+
+    private fun cancelSelectionMenuRecoveryTouch() {
+        // Cancel queued JS replies as well as an already-started touch.
+        selectionMenuRecoveryRequest?.let { request ->
+            selectionMenuRecoveryRequest = null
+            if (!isReleased) evaluateJavascript(ReaderSelectionCommand.CancelMenuRecovery(request.id, request.documentToken).source, null)
+        }
+        val touch = selectionMenuRecoveryTouch ?: return
+        selectionMenuRecoveryTouch = null
+        removeCallbacks(finishSelectionMenuRecoveryTouch)
+        dispatchSelectionMenuRecoveryTouch(touch, MotionEvent.ACTION_CANCEL)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        cancelSelectionMenuRecoveryTouch()
+        return super.onTouchEvent(event)
+    }
+
+    override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+        if (!hasWindowFocus) cancelSelectionMenuRecoveryTouch()
+        super.onWindowFocusChanged(hasWindowFocus)
     }
 
     fun prepareHighlightColorPicker(mode: ActionMode) {

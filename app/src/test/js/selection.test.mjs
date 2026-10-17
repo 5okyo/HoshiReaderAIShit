@@ -861,7 +861,15 @@ test('native menu anchor includes only visible selection fragments without chang
     ];
     const native = {
         isCollapsed: false, rangeCount: 1, toString: () => '読書',
-        getRangeAt: () => ({ getClientRects: () => rects }),
+        getRangeAt: () => ({
+            getClientRects: () => rects,
+            cloneRange: () => ({
+                collapse(start) { this.start = start; },
+                getBoundingClientRect() { return this.start
+                    ? {left:30,top:-200,right:80,bottom:-200}
+                    : {left:280,top:830,right:320,bottom:830}; },
+            }),
+        }),
     };
     window.getSelection = () => native;
     assert.deepEqual(JSON.parse(JSON.stringify(selection.nativeSelectionMenuRect())),
@@ -876,6 +884,31 @@ test('native menu anchor includes only visible selection fragments without chang
     assert.equal(selection.nativeSelectionMenuRect(), null);
 });
 
+test('native menu fallback uses current visible carets instead of intervening columns', () => {
+    const {selection,window} = loadSelection('本文。');
+    let endpoints = [{left:300,top:22,right:332,bottom:22},{left:220,top:44,right:252,bottom:44}];
+    const range = {
+        getClientRects:()=>[{left:220,top:0,right:332,bottom:748}],
+        cloneRange:()=>({
+            collapse(start) { this.start = start; },
+            getBoundingClientRect() { return endpoints[this.start?0:1]; },
+        }),
+    };
+    window.getSelection = () => ({isCollapsed:false,rangeCount:1,toString:()=> '本文。',getRangeAt:()=>range});
+    const bounds = () => JSON.parse(JSON.stringify(selection.nativeSelectionMenuRect()));
+    assert.deepEqual(bounds(),{left:220,top:22,right:332,bottom:45,viewportWidth:400},
+        'A period in a new vertical column keeps the menu near both handles');
+    endpoints = [{left:22,top:300,right:22,bottom:332},{left:44,top:220,right:44,bottom:252}];
+    assert.deepEqual(bounds(),{left:22,top:220,right:45,bottom:332,viewportWidth:400},
+        'Horizontal carets also form a nonempty anchor');
+    endpoints = [{left:300,top:-22,right:332,bottom:-22},{left:220,top:44,right:252,bottom:44}];
+    assert.deepEqual(bounds(),{left:220,top:44,right:252,bottom:45,viewportWidth:400},
+        'Only visible carets contribute to the anchor');
+    endpoints = [{left:0,top:0,right:0,bottom:0},{left:0,top:0,right:0,bottom:0}];
+    assert.deepEqual(bounds(),{left:220,top:0,right:332,bottom:748,viewportWidth:400},
+        'Element boundaries without caret geometry still use visible fragments');
+});
+
 
 test('native menu measurement is invalidated once by selection or scroll without reading layout', () => {
     const { selection, window, changeNativeSelection, dispatchDocumentEvent } = loadSelection('読書');
@@ -883,10 +916,13 @@ test('native menu measurement is invalidated once by selection or scroll without
     let reads = 0;
     const native = {
         isCollapsed: false, rangeCount: 1, toString: () => '読書',
-        getRangeAt: () => ({ getClientRects: () => {
-            reads++;
-            return [{ left: 20, top: 50, right: 40, bottom: 90 }];
-        }}),
+        getRangeAt: () => ({
+            getClientRects: () => { reads++; return [{ left: 20, top: 50, right: 40, bottom: 90 }]; },
+            cloneRange: () => ({
+                collapse() {},
+                getBoundingClientRect() { reads++; return {left:0,top:0,right:0,bottom:0}; },
+            }),
+        }),
     };
     window.getSelection = () => native;
     selection.configure({ bridge: 'android-reader', nativeSelectionToken: 'chapter-a' });
@@ -895,29 +931,37 @@ test('native menu measurement is invalidated once by selection or scroll without
         invalidateMenuAnchor: (id, token) => events.push([id, token]),
     };
     selection.nativeSelectionMenuRect(1);
+    const measuredReads = reads;
     changeNativeSelection(native);
     changeNativeSelection(native);
     dispatchDocumentEvent('scroll');
     assert.deepEqual(events, [[1, 'chapter-a']]);
-    assert.equal(reads, 1, 'Invalidation never reads layout');
+    assert.equal(reads, measuredReads, 'Invalidation never reads layout');
     selection.nativeSelectionMenuRect(2);
+    const remeasuredReads = reads;
+    assert.ok(remeasuredReads > measuredReads, 'A new menu measures its current geometry');
     dispatchDocumentEvent('scroll');
     dispatchDocumentEvent('scroll');
     assert.deepEqual(events, [[1, 'chapter-a'], [2, 'chapter-a']]);
-    assert.equal(reads, 2);
+    assert.equal(reads, remeasuredReads);
 });
 
 
-test('invalid touch menu requests recover once at a visible selected character', () => {
+test('invalid handle menu requests recover once at a visible selected character', () => {
     const { selection, window, document, dispatchDocumentEvent, changeNativeSelection } = loadSelection('読書');
     const calls = [];
     const invalidations = [];
     const textNode = { nodeType: 3 };
     const range = {
         getClientRects: () => [{left:20,top:40,right:40,bottom:80}],
+        cloneRange: () => ({
+            collapse(start) { this.start = start; },
+            getBoundingClientRect() { return {left:20,right:40,top:this.start?40:80,bottom:this.start?40:80}; },
+        }),
         comparePoint: (node) => node === textNode ? 0 : 1,
     };
-    const native = { isCollapsed:false,rangeCount:1,toString:()=> '読書',getRangeAt:()=>range };
+    const native = { isCollapsed:false,rangeCount:1,toString:()=> '読書',getRangeAt:()=>range,
+        anchorNode:textNode,anchorOffset:0,focusNode:textNode,focusOffset:2 };
     window.getSelection = () => native;
     document.caretRangeFromPoint = () => ({startContainer:textNode,startOffset:0});
     selection.configure({bridge:'android-reader',nativeSelectionToken:'chapter'});
@@ -925,12 +969,19 @@ test('invalid touch menu requests recover once at a visible selected character',
         postMessage(){}, recoverMenu:(id,token)=>calls.push([id,token]),
         invalidateMenuAnchor:(id,token)=>invalidations.push([id,token]),
     };
-    const event = (overrides={}) => ({isTrusted:true,button:0,clientX:30,clientY:-400,preventDefault(){this.prevented=true;},...overrides});
+    const event = (overrides={}) => ({isTrusted:true,pointerType:'mouse',button:-1,clientX:30,clientY:-400,preventDefault(){this.prevented=true;},...overrides});
+    for (const pointerType of ['touch','pen']) {
+        const initialPress = event({pointerType,button:-1});
+        dispatchDocumentEvent('contextmenu', initialPress);
+        assert.notEqual(initialPress.prevented,true,'A native long press must not start a second touch before the user lifts their finger');
+    }
     dispatchDocumentEvent('contextmenu', event({clientY:50}));
     dispatchDocumentEvent('contextmenu', event({isTrusted:false}));
     dispatchDocumentEvent('contextmenu', event({button:2}));
-    assert.equal(calls.length,0,'Normal, script, and mouse menus are not replayed');
-    const broken = event();
+    dispatchDocumentEvent('contextmenu', event({pointerType:'mouse',button:2}));
+    assert.equal(calls.length,0,'Normal, script, and secondary-button menus are not replayed');
+    // Chromium reports touch-handle adjustment as a mouse pointer with no changed button.
+    const broken = event({pointerType:'mouse',button:-1});
     dispatchDocumentEvent('contextmenu',broken);
     assert.equal(broken.prevented,true);
     assert.equal(calls.length,1);
@@ -939,9 +990,18 @@ test('invalid touch menu requests recover once at a visible selected character',
     assert.deepEqual(JSON.parse(JSON.stringify(selection.takeNativeMenuRecovery(calls[0][0], 42))),
         {x:30,y:60,viewportWidth:400});
     assert.equal(selection.takeNativeMenuRecovery(calls[0][0]),null,'A request can be consumed only once');
+    const replayed = event({pointerType:'mouse',button:-1});
+    dispatchDocumentEvent('contextmenu', replayed);
+    assert.notEqual(replayed.prevented,true,'Let the recovery gesture open its native menu even if Chromium repeats bad coordinates');
+    const replayedAgain = event({pointerType:'mouse',button:-1});
+    dispatchDocumentEvent('contextmenu', replayedAgain);
+    assert.notEqual(replayedAgain.prevented,true,'Repeated callbacks remain native until a new interaction or invalidation');
+    assert.equal(calls.length,1,'A recovery gesture cannot recursively recover itself');
+    native.focusOffset=1;
     changeNativeSelection(native);
     assert.deepEqual(invalidations, [[42, 'chapter']], 'Moving after consumption invalidates the pending native reply');
-    dispatchDocumentEvent('contextmenu',event());
+    dispatchDocumentEvent('contextmenu',event({pointerType:'mouse',button:-1}));
+    native.focusOffset=2;
     changeNativeSelection(native);
     assert.equal(selection.takeNativeMenuRecovery(calls.at(-1)[0]),null,'Moving the selection cancels recovery');
     dispatchDocumentEvent('contextmenu',event());
@@ -955,12 +1015,149 @@ test('invalid touch menu requests recover once at a visible selected character',
     assert.equal(misplaced.prevented,true,'Visible coordinates outside the selected text also need recovery');
     assert.deepEqual(JSON.parse(JSON.stringify(selection.takeNativeMenuRecovery(calls.at(-1)[0], 43))),
         {x:30,y:60,viewportWidth:400});
-    document.caretRangeFromPoint = () => ({startContainer:{},startOffset:0});
-    const count=calls.length;
-    dispatchDocumentEvent('contextmenu',event());
-    assert.equal(calls.length,count,'Do not replay over unselected text inside a block rectangle');
-    document.caretRangeFromPoint = () => ({startContainer:{parentElement:{closest:()=>({})}},startOffset:0});
-    range.comparePoint = () => 0;
-    dispatchDocumentEvent('contextmenu',event());
-    assert.equal(calls.length,count,'Ruby annotations are not a menu recovery target');
+});
+
+for (const {name, target, rangePosition} of [
+    {name:'unselected body text',target:{nodeType:3},rangePosition:1},
+    {name:'ruby annotations',target:{nodeType:3,parentElement:{closest:()=>({})}},rangePosition:0},
+]) {
+    test(`native menu recovery rejects ${name}`, () => {
+        const {selection,window,document,dispatchDocumentEvent} = loadSelection('読書');
+        const textNode = {nodeType:3};
+        const range = {
+            getClientRects:()=>[{left:20,top:40,right:40,bottom:80}],
+            comparePoint:node=>node===textNode?0:rangePosition,
+            cloneRange:()=>({
+                collapse(start) { this.start = start; },
+                getBoundingClientRect() { return {left:20,right:40,top:this.start?40:80,bottom:this.start?40:80}; },
+            }),
+        };
+        window.getSelection = () => ({isCollapsed:false,rangeCount:1,toString:()=> '読書',getRangeAt:()=>range});
+        document.caretRangeFromPoint = () => ({startContainer:target,startOffset:0});
+        selection.configure({bridge:'android-reader',nativeSelectionToken:'chapter'});
+        const calls = [];
+        window.HoshiNativeSelection = {recoverMenu:id=>calls.push(id)};
+        const request = () => {
+            const event = {isTrusted:true,pointerType:'mouse',button:-1,clientX:-1,clientY:-1,preventDefault(){this.prevented=true;}};
+            dispatchDocumentEvent('contextmenu',event);
+            return event;
+        };
+        assert.notEqual(request().prevented,true,'An invalid recovery target leaves the native event untouched');
+        assert.equal(calls.length,0,'An invalid recovery target cannot start a replay');
+        // A selected body target must still recover in the same fixture: the
+        // negative result cannot come from a replay guard or another early exit.
+        document.caretRangeFromPoint = () => ({startContainer:textNode,startOffset:0});
+        assert.equal(request().prevented,true,'A selected body target allows recovery');
+        assert.equal(calls.length,1);
+    });
+}
+
+test('cancelled native replays cannot suppress a later recovery and stale cancellations are ignored', () => {
+    const { selection, window, document, dispatchDocumentEvent } = loadSelection('読書');
+    const node = {nodeType:3};
+    const range = {
+        getClientRects:()=>[{left:20,top:40,right:40,bottom:80}], comparePoint:()=>0,
+        cloneRange:()=>({
+            collapse(start) { this.start = start; },
+            getBoundingClientRect() { return {left:20,right:40,top:this.start?40:80,bottom:this.start?40:80}; },
+        }),
+    };
+    window.getSelection = () => ({isCollapsed:false,rangeCount:1,toString:()=> '読書',getRangeAt:()=>range});
+    document.caretRangeFromPoint = () => ({startContainer:node,startOffset:0});
+    selection.configure({bridge:'android-reader',nativeSelectionToken:'chapter'});
+    const calls = [];
+    window.HoshiNativeSelection = {recoverMenu:id=>calls.push(id)};
+    const request = () => {
+        const event = {isTrusted:true,pointerType:'mouse',button:-1,clientX:30,clientY:-400,
+            preventDefault(){this.prevented=true;}};
+        dispatchDocumentEvent('contextmenu',event);
+        return event;
+    };
+    request();
+    const cancelled = calls.at(-1);
+    selection.takeNativeMenuRecovery(cancelled, 1);
+    selection.cancelNativeMenuRecoveryReplay(cancelled, 'chapter');
+    assert.equal(request().prevented,true,'A new recovery is allowed after the previous gesture is cancelled');
+    const current = calls.at(-1);
+    selection.takeNativeMenuRecovery(current, 2);
+    selection.cancelNativeMenuRecoveryReplay(cancelled, 'chapter');
+    selection.cancelNativeMenuRecoveryReplay(current, 'old-document');
+    assert.notEqual(request().prevented,true,'Stale cancellation cannot re-enable recursion for the active replay');
+});
+
+for (const consumed of [false, true]) {
+    test(`unchanged selection notifications preserve ${consumed ? 'replaying' : 'pending'} menu recovery`, () => {
+        const {selection,window,document,dispatchDocumentEvent,changeNativeSelection} = loadSelection('読書');
+        const node = {nodeType:3};
+        const range = {
+            getClientRects:()=>[{left:20,top:40,right:40,bottom:80}],comparePoint:()=>0,
+            cloneRange:()=>({
+                collapse(start) { this.start = start; },
+                getBoundingClientRect() { return {left:20,right:40,top:this.start?40:80,bottom:this.start?40:80}; },
+            }),
+        };
+        const native = {isCollapsed:false,rangeCount:1,toString:()=> '読書',getRangeAt:()=>range,
+            anchorNode:node,anchorOffset:0,focusNode:node,focusOffset:2};
+        window.getSelection = () => native;
+        document.caretRangeFromPoint = () => ({startContainer:node,startOffset:0});
+        selection.configure({bridge:'android-reader',nativeSelectionToken:'chapter'});
+        const calls = [],invalidations = [];
+        window.HoshiNativeSelection = {postMessage(){},recoverMenu:id=>calls.push(id),
+            invalidateMenuAnchor:(...args)=>invalidations.push(args)};
+        const request = () => {
+            const event = {isTrusted:true,pointerType:'mouse',button:-1,clientX:-1,clientY:-1,preventDefault(){this.prevented=true;}};
+            dispatchDocumentEvent('contextmenu',event);
+            return event;
+        };
+        request();
+        if (consumed) assert.ok(selection.takeNativeMenuRecovery(calls[0],42));
+        // WebView can deliver its final, duplicate selectionchange immediately
+        // after the handle's contextmenu, before Android has consumed the point.
+        changeNativeSelection(native);
+        if (!consumed) assert.ok(selection.takeNativeMenuRecovery(calls[0],42),
+            'The queued native reply still receives its recovery point');
+        assert.notEqual(request().prevented,true,'An unchanged selection cannot disarm the replay guard');
+        assert.equal(calls.length,1,'A duplicate notification cannot create another recovery');
+        assert.deepEqual(invalidations,[]);
+        // Identical text with reversed anchor/focus is still a real change.
+        native.anchorOffset=2;native.focusOffset=0;
+        changeNativeSelection(native);
+        assert.deepEqual(invalidations,[[42,'chapter']]);
+        assert.equal(request().prevented,true,'A real endpoint change permits a fresh recovery');
+    });
+}
+
+test('menu recovery targets selected text away from both handles regardless of text-node fragmentation', () => {
+    for (const vertical of [true, false]) for (const fragmented of [true, false]) {
+        const { selection, window, document, dispatchDocumentEvent } = loadSelection('読書の時間です');
+        window.getComputedStyle = () => ({writingMode:vertical?'vertical-rl':'horizontal-tb'});
+        const node = {nodeType:3};
+        const rect = (from, to) => vertical
+            ? {left:100,right:120,top:from,bottom:to}
+            : {left:from,right:to,top:100,bottom:120};
+        const range = {
+            getClientRects: () => fragmented
+                ? [rect(40,60),rect(60,80),rect(80,100),rect(100,120),rect(120,140)]
+                : [rect(40,140)],
+            comparePoint: candidate => candidate === node ? 0 : 1,
+            cloneRange: () => ({
+                collapse(start) { this.start = start; },
+                getBoundingClientRect() { return rect(this.start?40:140,this.start?40:140); },
+            }),
+        };
+        window.getSelection = () => ({isCollapsed:false,rangeCount:1,toString:()=> '読書の時間です',getRangeAt:()=>range});
+        document.caretRangeFromPoint = (x,y) => {
+            const along = vertical ? y : x, across = vertical ? x : y;
+            return across > 100 && across < 120 && along > 40 && along < 140
+                ? {startContainer:node,startOffset:2} : null;
+        };
+        selection.configure({bridge:'android-reader',nativeSelectionToken:'chapter'});
+        let point;
+        window.HoshiNativeSelection = {recoverMenu:id=>{point=selection.takeNativeMenuRecovery(id,1);}};
+        dispatchDocumentEvent('contextmenu',{isTrusted:true,button:-1,pointerType:'mouse',clientX:-1,clientY:-1,preventDefault(){}});
+        assert.ok(point, 'A visible selected body point is available');
+        const along = vertical ? point.y : point.x;
+        assert.ok(along >= 80 && along <= 100,
+            `Recovery must reach the selection interior instead of pressing an endpoint handle: ${JSON.stringify({vertical,fragmented,point})}`);
+    }
 });
