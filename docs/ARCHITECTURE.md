@@ -328,6 +328,9 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
 - Reader layout modes are WebView-backed assets for paginated, continuous, and
   VN reading. Kotlin selects the asset, injects typed settings, and keeps
   persisted progress as chapter progress mapped to whole-book character count.
+  Continuous restore aligns live text and its same-line ruby geometry without
+  inserting layout markers. Progress uses glyph centers to exclude clipped
+  slivers of adjacent lines, keeping repeated save/restore stable at tight line heights.
   Paginated page height and page steps use the visible WebView viewport height;
   vertical padding and column gaps contain only configured user spacing, with
   no extra font-size overlap strip.

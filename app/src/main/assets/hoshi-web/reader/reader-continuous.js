@@ -165,7 +165,60 @@ __HOSHI_READER_LAYOUT_SEMANTICS_SCRIPT__
     range.setEnd(node, offset + char.length);
     var rect = this.getRect(range);
     if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-    return vertical ? rect.left >= window.innerWidth : rect.bottom <= 0;
+    // Font/ruby metric boxes can overlap adjacent lines by a fraction of a pixel.
+    // A clipped sliver must not become the saved first line on every reopen.
+    return vertical ? (rect.left + rect.right) / 2 >= window.innerWidth : (rect.top + rect.bottom) / 2 <= 0;
+  },
+  restoreLineEdge: function(targetNode, targetRect, vertical) {
+    var scope = targetNode.parentElement;
+    while (scope && scope !== document.body) {
+      var display = window.getComputedStyle(scope).display || '';
+      if (/^(block|flow-root|list-item|table.*|flex|grid)$/.test(display)) break;
+      scope = scope.parentElement;
+    }
+    var edge = vertical ? targetRect.right : targetRect.top;
+    var inTargetLine = function(rect) {
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      // Adjacent metric boxes can overlap at tight line heights; their centers
+      // still belong to different lines. Ruby uses its base segment's center.
+      return vertical
+        ? Math.abs((rect.left + rect.right) - (targetRect.left + targetRect.right)) < Math.min(rect.width, targetRect.width)
+        : Math.abs((rect.top + rect.bottom) - (targetRect.top + targetRect.bottom)) < Math.min(rect.height, targetRect.height);
+    };
+    var walker = document.createTreeWalker(scope || document.body, NodeFilter.SHOW_TEXT);
+    var range = document.createRange();
+    var node;
+    while (node = walker.nextNode()) {
+      if (node === targetNode) continue;
+      var annotation = node.parentElement && node.parentElement.closest('rt');
+      var annotationInLine = false;
+      if (annotation) {
+        // Match the annotation's base segment, since rt can lie wholly outside
+        // the base metric box. Adjacent ruby segments may occupy another line.
+        for (var base = annotation.previousSibling; base; base = base.previousSibling) {
+          var tag = base.nodeType === Node.ELEMENT_NODE ? base.tagName.toLowerCase() : '';
+          if (tag === 'rt') break;
+          if (tag === 'rp') continue;
+          range.selectNodeContents(base);
+          if (Array.from(range.getClientRects()).some(inTargetLine)) {
+            annotationInLine = true;
+            break;
+          }
+        }
+        if (!annotationInLine) continue;
+      }
+      range.selectNodeContents(node);
+      var rects = range.getClientRects();
+      for (var i = 0; i < rects.length; i++) {
+        var rect = rects[i];
+        if (rect.width <= 0 || rect.height <= 0) continue;
+        // Include same-line text and annotations, never a neighboring line.
+        if (annotationInLine || inTargetLine(rect)) {
+          edge = vertical ? Math.max(edge, rect.right) : Math.min(edge, rect.top);
+        }
+      }
+    }
+    return edge;
   },
   scrollToTarget: function(target) {
     var rect = this.getRect(target);
@@ -411,24 +464,21 @@ __HOSHI_READER_SASAYAKI_SCRIPT__
           behavior: 'instant'
         });
       } else {
-      var range = document.createRange();
-      var targetText = targetNode.textContent || '';
-      var targetChar = String.fromCodePoint(targetText.codePointAt(targetOffset));
-      range.setStart(targetNode, targetOffset);
-      range.setEnd(targetNode, Math.min(targetText.length, targetOffset + Math.max(1, targetChar.length)));
-      var marker = document.createElement('span');
-      marker.style.display = 'inline-block';
-      marker.style.width = '1px';
-      marker.style.height = '1px';
-      range.insertNode(marker);
-      marker.scrollIntoView({
-        block: progress >= 0.999999 ? 'end' : 'start',
-        inline: 'nearest',
-        behavior: 'instant'
-      });
-      var parent = marker.parentNode;
-      marker.remove();
-      this.normalizeReaderText(parent);
+        var range = document.createRange();
+        var targetText = targetNode.textContent || '';
+        var targetChar = String.fromCodePoint(targetText.codePointAt(targetOffset));
+        range.setStart(targetNode, targetOffset);
+        range.setEnd(targetNode, Math.min(targetText.length, targetOffset + Math.max(1, targetChar.length)));
+        // An inline marker aligns its own baseline box, clipping half the text line.
+        // Use the existing glyph geometry without changing the chapter's layout.
+        var rect = this.getRect(range);
+        var vertical = this.isVertical();
+        var edge = this.restoreLineEdge(targetNode, rect, vertical);
+        window.scrollBy({
+          left: vertical ? edge - window.innerWidth : 0,
+          top: vertical ? 0 : edge,
+          behavior: 'instant'
+        });
       }
     }
     requestAnimationFrame(() => {

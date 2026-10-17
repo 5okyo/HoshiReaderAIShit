@@ -458,6 +458,13 @@ Manual reader validation should cover:
   Check default and enlarged line heights with ruby and inline images: glyphs,
   readings, and images must remain visible without overlapping adjacent lines;
   page/scroll progress and restoring the same passage must remain stable.
+- In continuous mode, align a line/column at the leading viewport edge, exit to
+  Bookshelf and reopen the book several times. The first text must remain fully
+  visible, including ruby annotations, without half-line clipping or drift.
+  Check horizontal and vertical writing with normal/large fonts, minimum/default
+  line heights and split inline spans. Recalculate and save progress after every
+  restore so small exposed slivers cannot accumulate backward drift.
+  `ReaderViewportWebViewTest` covers this loop with generated content in both directions.
 - VN block and sentence screens, reveal speed 0/45/120, blank-area click
   advance, text lookup taps, links, images, restore, and chapter boundaries.
 - VN cross-screen lookup with a word split at the current-screen boundary:

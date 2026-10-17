@@ -365,6 +365,7 @@ class TestRange extends TextRangeFixture {
     }
 
     getClientRects() {
+        if (this.node?.rangeRects) return this.node.rangeRects(this.startOffset, this.endOffset);
         return this.node?.rects ?? [];
     }
 
@@ -857,22 +858,99 @@ test('continuous Korean restore lands inside the target text after a supplementa
     second.appendChild(new TestText('ㄱㆎ한'));
     body.appendChild(first);
     body.appendChild(second);
-    const { reader, document } = loadReader(body, readerContinuousUrl, { writingMode: 'horizontal-tb' });
-    const createElement = document.createElement;
-    const landings = [];
-    document.createElement = (tag) => {
-        const element = createElement(tag);
-        element.scrollIntoView = () => {
-            landings.push({ parent: element.parentNode, precedingText: element.previousSibling?.textContent });
-        };
-        return element;
+    const { reader, window } = loadReader(body, readerContinuousUrl, { writingMode: 'horizontal-tb' });
+    second.firstChild.rangeRects = (start, end) => {
+        assert.equal(start, 1);
+        assert.equal(end, 2);
+        return [testRect(120, 147)];
     };
 
     await reader.restoreProgress(0.6);
 
-    assert.deepEqual(landings, [{ parent: second, precedingText: 'ㄱ' }]);
+    assert.equal(window.scrollY, 120);
     assert.equal(second.textContent, 'ㄱㆎ한');
 });
+
+for (const vertical of [true, false]) {
+    test(`continuous progress ignores a clipped sliver of the preceding ${vertical ? 'column' : 'line'}`, () => {
+        const body = new TestElement('body');
+        const text = new TestText('前後');
+        body.appendChild(text);
+        text.rangeRects = (start, end) => {
+            const rects = vertical
+                ? [testRect(0, 20, 479, 499), testRect(0, 20, 450, 470)]
+                : [testRect(-19, 1), testRect(10, 30)];
+            return rects.slice(start, end);
+        };
+        const { reader } = loadReader(body, readerContinuousUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+        });
+
+        assert.equal(reader.calculateProgress(), 0.5);
+    });
+
+    test(`continuous restore aligns the actual ${vertical ? 'column' : 'line'} without splitting text nodes`, async () => {
+        const body = new TestElement('body');
+        const text = new TestText('前𠮟가後');
+        body.appendChild(text);
+        const restoreMessages = [];
+        const { reader, window } = loadReader(body, readerContinuousUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+            restoreMessages,
+        });
+        window.scrollX = vertical ? -800 : 0;
+        window.scrollY = vertical ? 0 : 800;
+        text.rangeRects = (start, end) => {
+            assert.equal(start, 1);
+            assert.equal(end, 3);
+            return [vertical ? testRect(50, 77, 100, 139) : testRect(120, 159)];
+        };
+
+        await reader.restoreProgress(0.25);
+
+        assert.equal(window.scrollX, vertical ? -1141 : 0);
+        assert.equal(window.scrollY, vertical ? 0 : 920);
+        assert.equal(body.firstChild, text);
+        assert.equal(text.textContent, '前𠮟가後');
+        assert.deepEqual(restoreMessages, ['restore-token']);
+    });
+
+    test(`continuous restore includes ruby elsewhere in the same ${vertical ? 'column' : 'line'}`, async () => {
+        const body = new TestElement('body');
+        const text = new TestText('前𠮟가後');
+        body.appendChild(text);
+        for (const [baseText, reading, baseRect, annotationRect] of [
+            ['字', 'じ', vertical ? testRect(80, 107, 100, 139) : testRect(120, 159, 40, 60),
+                vertical ? testRect(80, 107, 130, 150) : testRect(110, 130, 40, 60)],
+            ['次', 'つぎ', vertical ? testRect(80, 107, 200, 239) : testRect(220, 259, 40, 60),
+                vertical ? testRect(80, 107, 230, 250) : testRect(210, 230, 40, 60)],
+            ['語', 'ご', vertical ? testRect(120, 147, 100, 139) : testRect(120, 159, 80, 100),
+                vertical ? testRect(120, 147, 155, 175) : testRect(85, 105, 80, 100)],
+            ['重', 'かさね', vertical ? testRect(120, 147, 135, 174) : testRect(155, 194, 80, 100),
+                vertical ? testRect(120, 147, 190, 210) : testRect(30, 50, 80, 100)],
+        ]) {
+            const ruby = new TestElement('ruby');
+            const base = new TestText(baseText);
+            base.rects = [baseRect];
+            ruby.appendChild(base);
+            const rt = new TestElement('rt');
+            const annotation = new TestText(reading);
+            annotation.rects = [annotationRect];
+            rt.appendChild(annotation);
+            ruby.appendChild(rt);
+            body.appendChild(ruby);
+        }
+        const { reader, window } = loadReader(body, readerContinuousUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+        });
+        text.rangeRects = () => [vertical ? testRect(50, 77, 100, 139) : testRect(120, 159)];
+
+        await reader.restoreProgress(1 / 8);
+
+        assert.equal(window.scrollX, vertical ? -305 : 0);
+        assert.equal(window.scrollY, vertical ? 0 : 85);
+    });
+}
 
 test('continuous restoreProgress zero resets every WebView scroll surface', async () => {
     const body = new TestElement('body');

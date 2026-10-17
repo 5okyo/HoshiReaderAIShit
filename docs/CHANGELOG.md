@@ -153,6 +153,8 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Fixed
 
+- Restore continuous reading to the text line or column edge when reopening a
+  book, keeping text and furigana visible without half-line clipping or position drift.
 - Preserve specific error details and underlying causes across imports, settings,
   Reader, dictionaries, Anki, audio, TTS, Sasayaki, sync, backups, updates and
   statistics, alongside the localized operation or category description.
