@@ -112,6 +112,40 @@ node --test app/src/test/js/*.test.mjs
 - Use a clean disposable emulator only when the target explicitly requires first
   launch, empty-library, duplicate-import, migration, or corrupted-data coverage.
 
+## Error Diagnostics
+
+- For changed failure paths, assert that the visible error retains the localized
+  operation/category summary and a specific exception message plus nested cause.
+  Test blank-message fallback to the exception type and preserve backend/native
+  error codes when those are the available diagnostic.
+- Batch failures must identify each failed file/object and its reason while
+  continuing independent items. Dismiss/retry must still work, and cancellation
+  must not publish an error. Preserve explicitly intended automatic offline
+  suppression and successful optional/cache fallbacks.
+- Live form validation, including unfinished regex patterns and replacement
+  templates, must retain inline original diagnostics without adding runtime
+  history. Completing the draft must clear validation and restore preview;
+  genuine service or storage failures must still reach the visible state and history.
+- On-device error QA uses existing dialogs, snackbars or retry states. Check a
+  malformed EPUB import and one nested IO/service failure; details must remain
+  readable instead of being replaced by a generic message or only logged.
+- Open Diagnostics immediately after a runtime failure, then reopen after an
+  app restart: the operation, time and original cause/stack must remain. The
+  overview must show single-line app/WebView metadata values with separate
+  crash, error and process-exit entries (including independent empty states);
+  each list has one scroll surface and opens selectable full details on tap.
+  Return from each list and confirm its navigation state. Save and open Share
+  without selecting a recipient from the overview and any record list; exported
+  text must include
+  runtime errors and existing crash/process records. Repeated dialog
+  recomposition must not add duplicates. Test a source-only platform/service
+  error without inventing an
+  exception, plus malformed runtime-history storage with automatic recovery,
+  retained original parse failure and unaffected crash diagnostics. Cancel a
+  diagnostics snapshot at
+  the drain/write boundary and verify all pending original events still persist,
+  while caller cancellation continues to propagate.
+
 ## Test Data
 
 - EPUB: `testdata/test.epub`, `testdata/test2.epub`.
@@ -985,6 +1019,13 @@ Validate relevant sync/update/Sasayaki changes with:
 - GitHub update prompts, skip-version, manual checks, completed-download
   prompts, user-triggered install, same-version APK cleanup, and split APK
   updates on arm64-v8a and armeabi-v7a targets.
+  Cover API fallback with a local HTTP server: a redirect to a `200 text/html`
+  homepage must retain both request/final URLs, status, content type and body
+  without entering the JSON parser; `403` responses must retain the original
+  body and rate-limit/retry headers. When all candidates fail, the visible
+  diagnostic and saved stack must retain every URL and nested original cause.
+  Cancellation must propagate without trying another source. Verify a normal
+  JSON release response and an on-device manual check against GitHub.
 - Sasayaki defaults, reader toggle visibility, auto-scroll, auto-pause on
   lookup, subtitle cue matching that starts immediately after selecting a valid
   SRT without a separate Match action, lookup taps on active cue text in normal

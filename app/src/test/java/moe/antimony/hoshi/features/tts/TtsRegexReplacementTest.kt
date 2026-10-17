@@ -1,10 +1,67 @@
 package moe.antimony.hoshi.features.tts
 
+import java.io.IOException
 import kotlinx.serialization.json.*
+import moe.antimony.hoshi.R
+import moe.antimony.hoshi.ui.ErrorDiagnosticEvents
+import moe.antimony.hoshi.ui.UiText
+import moe.antimony.hoshi.ui.diagnosticMessage
+import moe.antimony.hoshi.ui.resolve
 import org.junit.Assert.*
 import org.junit.Test
 
 class TtsRegexReplacementTest {
+    @Test fun editingRegexDraftsKeepsInlineDiagnosticsWithoutRecordingRuntimeErrors() {
+        ErrorDiagnosticEvents.buffer.drain()
+        try {
+            val networkFailure = IOException("Voice provider unavailable", IOException("Connection refused"))
+            val networkError = networkFailure.toTtsError(TtsFailure.Network)
+            val networkMessage = networkError.message.resolve({ _, _ -> "Network failed" }, { _, _, _ -> "" })
+            assertTrue(networkMessage.contains("Voice provider unavailable\nConnection refused"))
+
+            val sentence = TtsSentence(0, 0, 2, "ab")
+            val preferences = TtsPreferences()
+            val drafts = listOf(
+                rule("(", "a") to TtsWordError.RegexPattern,
+                rule("[ab", "a") to TtsWordError.RegexPattern,
+                rule("(a)", "$") to TtsWordError.RegexReplacement,
+                rule("(a)", "\$2") to TtsWordError.RegexReplacement,
+            )
+            drafts.forEach { (draft, category) ->
+                val preview = prepareTtsWordPreview(draft, sentence, null, preferences)
+                assertEquals(category, preview.error)
+                assertNull(preview.text)
+                val original = requireNotNull(TtsRegexRule.failure(draft)).diagnosticMessage()
+                val message = requireNotNull(preview.errorMessage).resolve({ _, _ -> "Invalid draft" }, { _, _, _ -> "" })
+                assertEquals("Invalid draft\n$original", message)
+            }
+            val complete = prepareTtsWordPreview(rule("(a)", "\$1"), sentence, null, preferences)
+            assertNull(complete.error)
+            assertNull(complete.errorMessage)
+            assertEquals("ab", complete.text)
+            assertEquals(listOf(networkFailure), ErrorDiagnosticEvents.buffer.drain().map { it.error })
+        } finally {
+            ErrorDiagnosticEvents.buffer.drain()
+        }
+    }
+
+    @Test fun invalidPatternPreviewKeepsTheOriginalParserDiagnostic() {
+        val preview = prepareTtsWordPreview(rule("[", "a"), TtsSentence(0, 0, 1, "a"), null, TtsPreferences())
+
+        assertEquals(TtsWordError.RegexPattern, preview.error)
+        assertNotNull(preview.errorMessage)
+        val message = preview.errorMessage!!.resolve({ _, _ -> "Invalid pattern" }, { _, _, _ -> "" })
+        assertTrue(message.startsWith("Invalid pattern\n"))
+        assertTrue(message.contains("missing closing ]"))
+    }
+
+    @Test fun invalidReplacementPreviewKeepsTheOriginalGroupValidationDiagnostic() {
+        val preview = prepareTtsWordPreview(rule("(a)", "\$2"), TtsSentence(0, 0, 1, "a"), null, TtsPreferences())
+
+        assertEquals(TtsWordError.RegexReplacement, preview.error)
+        assertEquals(UiText.Joined(listOf(UiText.Resource(R.string.tts_invalid_regex_replacement), UiText.Literal("Failed requirement."))), preview.errorMessage)
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     @Test fun emptyLiteralAndRegexReplacementsDeleteWithoutChangingSource() {
         val sentence = TtsSentence(3, 8, 6, "前（注）後々。")
