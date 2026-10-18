@@ -87,6 +87,15 @@ node --test app/src/test/js/*.test.mjs
   Transcription and start a transcription once so the app downloads and verifies
   its resources. The device tests below use those files and fail instead of
   downloading.
+- For component download recovery, use scratch resources to interrupt a response
+  after a known prefix. Verify automatic Range retries, resumed byte progress,
+  cancellation during backoff, and reuse after reopening. A server ignoring Range
+  must restart safely; malformed ranges, wrong sizes and hashes must never publish
+  a component or replace an installed file. Exercise a read-only native library too.
+  After retry exhaustion, the screen and persisted Diagnostics must retain the file,
+  catalog URL, received/expected bytes, attempt count and nested original cause.
+  Cancellation must not create an error record. Do not delete or change permissions
+  on the user's installed components to inject failures.
 - `NakuruDeviceTest` accepts `nakuruClip` (an app-readable 16 kHz PCM16 mono WAV).
   Invoke it directly with `adb shell am instrument -w -r -e class
   moe.antimony.hoshi.features.sasayaki.transcription.NakuruDeviceTest ...

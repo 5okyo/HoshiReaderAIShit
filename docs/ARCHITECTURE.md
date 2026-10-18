@@ -648,7 +648,15 @@ refactor goals belong in `docs/ARCHITECTURE_REFACTORING.md`.
   in the APK. All missing resources share one consent and byte-weighted progress
   flow. Native files become read-only before writing and are atomically published
   after verification, then loaded by absolute path. Downloads are excluded from
-  Android backup. This is the GitHub APK distribution path; a Play distribution
+  Android backup. Hash-specific partial files survive interruption/cancellation and
+  app restarts. Each file gets up to three attempts with cancellable 1/2-second
+  backoff for connection/read failures and HTTP 408/429/5xx. Resume requests use
+  Range and validate Content-Range and catalog sizes; a full 200 response restarts
+  the file. SHA-256 still gates atomic publication. Read-only native checkpoints
+  are copied through a new descriptor marked read-only before writing, never made
+  writable again. Terminal failures carry the file, catalog URL, received/expected
+  bytes, attempt count and original cause into localized UI details and Diagnostics.
+  This is the GitHub APK distribution path; a Play distribution
   would require Play Feature Delivery.
   The minimal FFmpeg 9.0.2 JNI decoder reads SAF/private-file descriptors with
   offset/length bounds, downmixes/resamples to 16 kHz, and preserves source timestamps.

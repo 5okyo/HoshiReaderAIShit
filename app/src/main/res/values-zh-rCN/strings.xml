@@ -883,6 +883,7 @@
     <string name="sasayaki_transcription_clear_message">仅清除转写数据，保留当前匹配结果。</string>
     <string name="sasayaki_transcription_error_audio">无法读取此音频。请确认文件完整、可访问且格式受支持，然后重试。</string>
     <string name="sasayaki_transcription_error_resources">无法下载或校验转写文件。请检查网络连接和可用存储空间后重试。</string>
+    <string name="sasayaki_transcription_download_details">文件：%1$s\n下载地址：%2$s\n已接收：%3$d/%4$d 字节\n尝试次数：%5$d</string>
     <string name="sasayaki_transcription_error_recognition">日语语音识别无法启动或完成。请重启应用后重试；若仍失败，可切换为“轻量”模式。</string>
     <string name="sasayaki_transcription_error_match">无法将转写内容与此书匹配。请确认书籍可正常打开且内容与音频相符。</string>
     <string name="sasayaki_transcription_error_storage">无法保存转写进度。请检查可用存储空间，并确认书籍仍可访问。</string>

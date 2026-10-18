@@ -16,7 +16,13 @@ import moe.antimony.hoshi.epub.SasayakiMatch
 import moe.antimony.hoshi.epub.SasayakiMatchData
 import moe.antimony.hoshi.features.sasayaki.transcription.SasayakiTranscriptionBackend
 import moe.antimony.hoshi.features.sasayaki.transcription.SasayakiTranscriptionBatch
+import moe.antimony.hoshi.features.sasayaki.transcription.SasayakiDownloadFailure
+import moe.antimony.hoshi.features.sasayaki.transcription.SasayakiModelFile
+import moe.antimony.hoshi.features.diagnostics.NonfatalDiagnosticsLogger
+import moe.antimony.hoshi.features.diagnostics.NonfatalDiagnosticsStore
+import moe.antimony.hoshi.ui.ErrorDiagnosticEvents
 import moe.antimony.hoshi.ui.UiText
+import moe.antimony.hoshi.ui.resolve
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -25,6 +31,38 @@ import org.junit.rules.TemporaryFolder
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class SasayakiTranscriptionCoordinatorTest {
     @get:Rule val temporary = TemporaryFolder()
+
+    @Test fun downloadFailureContextReachesScreenStateAndPersistedDiagnosticsWithOriginalCause() = runTest {
+        ErrorDiagnosticEvents.buffer.drain()
+        val spec = SasayakiModelFile("nakuru.pack", "https://example.org/nakuru.pack", 100, "pinned-hash")
+        val original = IOException("unexpected end of stream", IOException("peer closed connection"))
+        val failure = SasayakiDownloadFailure(spec, 42, 3, original)
+        val backend = object : SasayakiTranscriptionBackend {
+            override suspend fun duration(source: String) = 100.0
+            override suspend fun transcribe(source: String, from: Double, onDownloadRequired: suspend (Long) -> Unit, onDownload: suspend (Double) -> Unit, onBatch: suspend (SasayakiTranscriptionBatch) -> Unit, parallelism: Int) {
+                throw failure.asSasayakiFailure(SasayakiFailureKind.ModelResources)
+            }
+        }
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val coordinator = SasayakiTranscriptionCoordinator(backend, MemoryRepository(), BookWorkRegistry(), backgroundScope, dispatcher)
+        coordinator.start(temporary.newFolder(), "audio")
+        runCurrent()
+
+        val operation = UiText.Joined(listOf(UiText.Resource(R.string.sasayaki_transcription_error_resources),
+            UiText.Resource(R.string.sasayaki_transcription_download_details, spec.name, spec.url, 42L, 100L, 3)))
+        assertFalse(coordinator.state.value.running)
+        assertEquals(UiText.Joined(listOf(operation, UiText.Literal("unexpected end of stream\npeer closed connection"))),
+            coordinator.state.value.error)
+
+        val directory = temporary.newFolder()
+        val logger = NonfatalDiagnosticsLogger(NonfatalDiagnosticsStore(directory, dispatcher), backgroundScope,
+            ErrorDiagnosticEvents.buffer) { it.resolve({ _, args -> args.joinToString("|") }, { _, _, _ -> "" }) }
+        logger.snapshot()
+        val saved = NonfatalDiagnosticsStore(directory, dispatcher).snapshot().single()
+        assertTrue(saved.operation, saved.operation.contains("nakuru.pack|https://example.org/nakuru.pack|42|100|3"))
+        assertEquals("unexpected end of stream\npeer closed connection", saved.message)
+        assertTrue(saved.stackTrace.contains("Caused by: java.io.IOException: peer closed connection"))
+    }
 
     @Test fun nakuruPublishesMatchesBeforePausing() = runTest {
         val root = temporary.newFolder()
