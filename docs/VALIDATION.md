@@ -355,6 +355,55 @@ node --test app/src/test/js/*.test.mjs
 Preserve app data and cover all four tabs, every settings category, native Reader
 panels, dialogs, menus, and Process Text lookup:
 
+- Run the 12-case popup matrix: system Light/Dark × App Light/Dark/Automatic,
+  both with and without E-ink. Verify audio source menus, dictionary/recursive
+  lookup, ordinary and conjugation table headers, explanatory overlays, monochrome
+  images/canvases, native text toolbars and highlight palettes. App appearance must
+  control both built-in colors and `prefers-color-scheme`, regardless of the system.
+  Repeat foreground/background system changes and cold entry through Main and
+  external Process Text. Native text toolbar/highlight palette may close; Compose
+  dialogs, reading position, lookup DOM/scroll/history and audio selection persist.
+  Entry action buttons share opaque enabled/disabled colors in both display modes:
+  light uses `#000000` / `#999999`, dark uses `#ffffff` / `#666666`. Verify all
+  format icons/sizes, audio and note search, including duplicates with Allow
+  Duplicates on/off, pending mining and failure recovery. Availability controls
+  tint independently of the duplicate icon; disabled buttons have no pressed
+  feedback. Check custom button CSS, history restoration, and scale 0.8/1/2.
+  For transparent lookup pages, also verify the embedding iframe's `color-scheme`
+  matches its document after light/dark switches. Checking computed transparent
+  backgrounds alone is insufficient: Chromium paints an opaque canvas when the
+  two schemes differ. Compare the visible page with the surrounding App surface.
+- `LookupPopupThemeWebViewTest` uses actual Chromium computed styles/pixels, the
+  tracked `app/src/androidTest/assets/ios-reference/popup.css` fixture supplied
+  only to the test APK, and copied user media-query CSS. CI and Android builds
+  must not require an initialized iOS reference checkout. The fixture README
+  records its source commit and checksum; when adopting upstream popup palette
+  changes, update the fixture and its provenance together and rerun the rendered
+  color contract. It covers App/native disagreement, E-ink, dictionary cascade
+  isolation and `--popup-scale` at 0.8/1/2. `ReaderNativePopupThemeTest` checks native popup roles
+  and dismissal. Build `:app:assembleDebugAndroidTest`, install both APKs with
+  `adb install -r`, invoke these classes with `am instrument -w -r -e class`, and
+  require `OK`, never just a successful shell exit.
+- `AppThemeDeviceTest` is an opt-in populated-device matrix using the installed
+  「食べる」/明鏡国語辞典 第三版 fixture. It drives normal Theme ViewModel events,
+  verifies retained real lookup views, system independence, custom palette groups,
+  foreground return and Process Text; screenshots/results go to app cache.
+  It changes global theme preferences, so back up **only** their file first:
+  `adb exec-out run-as moe.antimony.hoshi.debug cat files/datastore/app-display-settings.preferences_pb > /tmp/hoshi-display-before.preferences_pb`.
+  Record `adb shell cmd uimode night`. Run with `-e verifyThemeMatrix true` and
+  `-e class moe.antimony.hoshi.features.display.AppThemeDeviceTest`. Afterwards,
+  including failures, force-stop the app, restore the exact saved file with
+  `adb shell "run-as moe.antimony.hoshi.debug sh -c 'cat > files/datastore/app-display-settings.preferences_pb'" < /tmp/hoshi-display-before.preferences_pb`,
+  restore the recorded system mode via `cmd uimode night`, and relaunch. Do not
+  clear app data or overwrite any other preferences/profile files. This exact-file
+  restoration preserves nullable E-ink overrides and inactive custom palette colors.
+  For cold coverage, invoke `#preparePersistedThemeForColdStart` with `themeMode`
+  (`light`/`dark`/`auto`), `themeSystemDark` and `themeEInk` (`true`/`false`). Then
+  invoke `#coldNativeThemeIsAppliedBeforeFirstLookupWebView` in a **separate**
+  instrumentation process, with `themeEntry` (`main`/`processText`), `expectedDark`
+  and `themeSystemDark`. Repeat both entries for all 12 cases before restoring the
+  backup. This catches first WebView construction resetting Activity resources;
+  running cold assertions after other WebView tests in the same process cannot.
 - Both switching modes show Light / Sepia / Custom Light and Dark / Warm Dark /
   Custom Dark. Automatic mode has one selection per group; manual mode has one
   selection across all six options. Change system night mode while foregrounded

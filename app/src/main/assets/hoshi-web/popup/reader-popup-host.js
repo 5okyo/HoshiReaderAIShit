@@ -151,7 +151,16 @@
         return message;
     }
 
+    function syncIframeTheme(record) {
+        const {darkMode, eInkMode} = record.payload;
+        const key = `${!!darkMode}/${!!eInkMode}`;
+        if (record.themeKey === key) return;
+        record.themeKey = key;
+        record.iframe.contentWindow?.postMessage({type: 'setPopupTheme', darkMode: !!darkMode, eInkMode: !!eInkMode}, ORIGIN);
+    }
+
     function renderIframe(record) {
+        syncIframeTheme(record);
         record.iframe.contentWindow?.postMessage(iframeRenderMessage(record.payload), ORIGIN);
     }
 
@@ -206,6 +215,7 @@
         shell.dataset.revealReady = 'false';
         const record = { shell, iframe, payload, contentReady: false, revealReady: false, loaded: false, root: false };
         iframe.addEventListener('load', () => {
+            record.themeKey = null;
             record.loaded = true;
             if (record.payload) {
                 frameSources.set(iframe.contentWindow, record.payload.id);
@@ -285,8 +295,9 @@
             resetIframe(record);
             record.loaded = false;
             record.iframe.src = payload.iframeUrl;
-        } else if (needsRender && record.loaded) {
-            renderIframe(record);
+        } else if (record.loaded) {
+            syncIframeTheme(record);
+            if (needsRender) renderIframe(record);
         }
     }
 
@@ -727,6 +738,7 @@
             writing-mode: horizontal-tb;
             direction: ltr;
             text-orientation: mixed;
+            color-scheme: light;
             background: #fff;
             border: 1px solid rgba(120, 120, 128, 0.36);
             border-radius: 10px;
@@ -758,6 +770,7 @@
             pointer-events: none;
         }
         #${LAYER_ID} .hoshi-reader-popup-shell[data-dark-mode="true"] {
+            color-scheme: dark;
             background: #000;
             border-color: rgba(255, 255, 255, 0.34);
             box-shadow: 0 3px 12px rgba(0, 0, 0, 0.44);
