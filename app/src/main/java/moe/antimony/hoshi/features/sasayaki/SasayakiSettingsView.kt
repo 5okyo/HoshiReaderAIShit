@@ -41,7 +41,6 @@ import moe.antimony.hoshi.features.reader.ReaderColorSettingRow
 import moe.antimony.hoshi.features.settings.SettingsDetailScaffold
 import moe.antimony.hoshi.features.settings.SettingsLoadState
 import moe.antimony.hoshi.features.settings.rememberSettingsLoader
-import kotlinx.coroutines.flow.combine
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,12 +51,8 @@ fun SasayakiSettingsView(
     val appContainer = LocalHoshiUiDependencies.current
     val scope = rememberCoroutineScope()
     val repository = appContainer.sasayakiSettingsRepository
-    val syncRepository = appContainer.syncSettingsRepository
-    val settingsFlow = remember(repository, syncRepository) {
-        combine(repository.settings, syncRepository.settings) { settings, sync -> settings to sync }
-    }
-    val settingsLoader = settingsFlow.rememberSettingsLoader()
-    val settings = (settingsLoader.state as? SettingsLoadState.Loaded)?.value?.first
+    val settingsLoader = repository.settings.rememberSettingsLoader()
+    val settings = (settingsLoader.state as? SettingsLoadState.Loaded)?.value
     var skipActionMenuExpanded by remember { mutableStateOf(false) }
     var colorDialogRow by remember { mutableStateOf<SasayakiColorRow?>(null) }
 
@@ -74,7 +69,7 @@ fun SasayakiSettingsView(
         onClose = onClose,
         onRetry = settingsLoader.retry,
         modifier = modifier,
-    ) { innerPadding, (loadedSettings, loadedSyncSettings) ->
+    ) { innerPadding, loadedSettings ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
@@ -107,19 +102,6 @@ fun SasayakiSettingsView(
                                 )
                             },
                         )
-                        if (loadedSettings.enabled && loadedSyncSettings.enabled) {
-                            SettingsDivider()
-                            ListItem(
-                                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-                                headlineContent = { Text(stringResource(R.string.sync_ttu_sync)) },
-                                trailingContent = {
-                                    Switch(
-                                        checked = loadedSettings.syncEnabled,
-                                        onCheckedChange = { save { current -> current.copy(syncEnabled = it) } },
-                                    )
-                                },
-                            )
-                        }
                         SettingsDivider()
                         ListItem(
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),

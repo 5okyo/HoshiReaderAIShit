@@ -897,6 +897,40 @@
     <string name="sasayaki_transcription_light_description">Uses fewer resources, with slower transcription.</string>
     <string name="sasayaki_transcription_balanced_description">Balances transcription speed and everyday use.</string>
     <string name="sasayaki_transcription_fast_description">Faster transcription; may generate more heat.</string>
+    <string name="statistics_sessions_heading">Sessions</string>
+    <string name="sync_provider">Provider</string>
+    <string name="sync_provider_ttu">ッツ/yatsu</string>
+    <string name="sync_hoshi_description">Sync your library between Hoshi Reader devices.</string>
+    <string name="sync_unsupported_format">This library uses an unsupported sync format. Update Hoshi Reader to sync.</string>
+    <string name="sync_book_deleted">This book was deleted.</string>
+    <string name="sync_book_not_uploaded">This book has not been uploaded yet.</string>
+    <string name="sync_last_sync">Last Sync</string>
+    <string name="sync_now">Sync Now</string>
+    <string name="sync_status_choice_needed">Choice needed</string>
+    <string name="sync_attach_title">Merge Libraries?</string>
+    <string name="sync_attach_message">Google Drive already has a library. Merging combines changes from both libraries.</string>
+    <string name="sync_attach_upload">Upload to Google Drive</string>
+    <string name="sync_attach_download">Download from Google Drive</string>
+    <string name="sync_attach_upload_title">Upload to Google Drive?</string>
+    <string name="sync_attach_download_title">Download from Google Drive?</string>
+    <string name="sync_attach_upload_confirmation">This will permanently delete the library on Google Drive and replace it with the library from this device. Anything not on this device will be lost.</string>
+    <string name="sync_attach_download_confirmation">This will permanently delete the library on this device and replace it with the library from Google Drive. Anything not on Google Drive will be lost.</string>
+    <string name="sync_queue">Queue</string>
+    <string name="sync_queue_empty">Empty</string>
+    <string name="sync_queue_all_synced">All Books Synced</string>
+    <string name="sync_queue_progress" translatable="false">%1$d / %2$d</string>
+    <plurals name="sync_queue_failed">
+        <item quantity="one">%1$d failed</item>
+        <item quantity="other">%1$d failed</item>
+    </plurals>
+    <string name="sync_download_all_books">Download All Books</string>
+    <string name="sync_download_all_books_title">Download All Books?</string>
+    <plurals name="sync_download_all_books_confirmation">
+        <item quantity="one">This will download %1$d book from Google Drive.</item>
+        <item quantity="other">This will download %1$d books from Google Drive.</item>
+    </plurals>
+    <string name="sync_delete_local">Delete Local</string>
+    <string name="sync_delete_everywhere">Delete Everywhere</string>
     <string name="tts_tab_voice" comment="TTS panel tab containing source, voice and rate controls.">Voice</string>
     <string name="tts_tab_dictionary">Replacements</string>
     <string name="tts_rate_label">Engine speech rate</string>
@@ -1101,4 +1135,12 @@
     <string name="diagnostics_webview" translatable="false">WebView</string>
     <string name="sasayaki_nakuru_unavailable">Nakuru is not available on this device.</string>
     <string name="sasayaki_legacy_resources_cleanup">Remove retired transcription resource: %1$s</string>
+    <string name="sync_error_details">View sync error</string>
+    <string name="sync_book_failed_format">Could not sync “%1$s”.</string>
+    <string name="sync_download_book_failed_format">Could not download “%1$s”.</string>
+    <string name="sync_file_failed_format">Could not sync “%1$s”: %2$s.</string>
+    <string name="sync_cleanup_failed_format">Could not clean up old cloud files for “%1$s”.</string>
+    <string name="sync_file_epub">EPUB content</string>
+    <string name="sync_file_cover">cover image</string>
+    <string name="sync_file_sasayaki">Sasayaki matches</string>
 </resources>

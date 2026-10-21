@@ -8,6 +8,33 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 
 ### Added
 
+- Add Hoshi Google Drive sync alongside TTU, sharing books, reading position,
+  highlights, shelves, reading sessions and Sasayaki playback with iOS. Cloud
+  books download when opened; choose Delete Local to keep the cloud copy or
+  Delete Everywhere to remove it across devices while retaining reading history.
+  Book deletion actions stack vertically, and cloud icons sit inline on the first
+  title line.
+  Google Drive sign-in, foreground sync, cloud-book download and library-merge
+  failures retain original error details in error views and Diagnostics; batches
+  keep each failed book and file category, and canceling stays quiet.
+  Connecting through the Google account picker resets pending sync operations so
+  books deleted before sign-in do not delete existing cloud copies.
+  When native Google authorization requires consent again, the Connect button
+  reappears without signing out first; temporary errors keep the connection.
+  Devices without Google Play Services can connect through their browser.
+  Android-generated Sasayaki matches include the image-list field required by iOS.
+  Debug builds sync edits after 2 seconds and poll for cloud changes every 5 seconds.
+  Bookshelf and Statistics refreshes are batched during sync and skipped while reading.
+  Full syncs of large libraries are faster, a failed book no longer stops the
+  rest of the sync, and Sync settings show a transfer queue with progress and
+  per-book errors.
+  Books sync eight at a time using far fewer Google Drive requests, and
+  rate-limited or failed requests are retried.
+  Background sync waits for a network connection and retries temporary failures,
+  including sustained Drive rate limits. It finishes only after uploaded files'
+  references are published so other devices can download them; failures at this
+  final step also follow the retry policy. Background launches do not start foreground polling.
+  Renaming a shelf preserves its order and book memberships.
 - Keep the latest 100 runtime errors in Diagnostics, including the operation,
   time, original error details and cause stack; retain them across restarts,
   and copy or export them with crash history.
@@ -150,6 +177,9 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
 ### Changed
 
 - Replace BIZ UDPGothic with BIZ UDGothic in the recommended reader fonts.
+- Edit individual reading sessions in Statistics. Session deletions persist across
+  sync, and daily totals follow the selected reset time. If another device deletes
+  the session being edited, its editor closes without restoring the deleted session.
 
 ### Fixed
 

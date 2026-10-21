@@ -1,5 +1,11 @@
 package moe.antimony.hoshi.features.bookshelf
 
+import moe.antimony.hoshi.features.sync.SyncFileType
+import moe.antimony.hoshi.features.sync.syncKey
+import moe.antimony.hoshi.features.sync.SyncStorage
+import moe.antimony.hoshi.features.sync.SyncReloadScheduler
+import moe.antimony.hoshi.features.sync.syncMessage
+
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -7,7 +13,10 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -43,12 +52,26 @@ internal class BookshelfViewModel : ViewModel {
         get() = injectedScope ?: viewModelScope
 
     @Inject
-    constructor(repository: BookshelfRepository) : this(
+    constructor(repository: BookshelfRepository, syncStorage: SyncStorage) : this(
         repository = repository,
         coroutineScope = null,
         importGate = PendingImportGate(),
         marker = Unit,
-    )
+    ) {
+        val syncReload = SyncReloadScheduler(viewModelScope, { syncStorage.applyReaderState != null }, ::reloadBookEntries)
+        viewModelScope.launch {
+            syncStorage.booksChanged.collect {
+                if (uiState.value.hasLoadedBooks) syncReload.schedule()
+            }
+        }
+        viewModelScope.launch {
+            syncStorage.records.collect { records ->
+                _uiState.update { state ->
+                    state.copy(canDeleteLocalBookIds = state.bookEntries.filter { it.metadata.epub != null && records.books[it.root.name.syncKey()]?.files?.get(SyncFileType.epub)?.value != null }.mapTo(mutableSetOf()) { it.metadata.id })
+                }
+            }
+        }
+    }
 
     internal constructor(
         repository: BookshelfRepository,
@@ -74,7 +97,10 @@ internal class BookshelfViewModel : ViewModel {
 
     private val _uiState = MutableStateFlow(BookshelfUiState())
     val uiState: StateFlow<BookshelfUiState> = _uiState
-    private var openBookInFlight = false
+    private var openBookJob: Job? = null
+    private var openingBookId: String? = null
+    private var menuDownloads: Job? = null
+    private val downloads = mutableMapOf<String, Deferred<Result<Unit>>>()
     private var reloadGeneration = 0
     private var remoteLoadJob: Job? = null
     private val remoteImportsInFlight = mutableSetOf<String>()
@@ -87,10 +113,17 @@ internal class BookshelfViewModel : ViewModel {
     fun refreshRemoteBooks() {
         if (!_uiState.value.hasLoadedBooks) return
         remoteLoadJob?.cancel()
-        val generation = reloadGeneration
-        val localEntries = _uiState.value.bookEntries
-        _uiState.update { it.copy(errorMessage = null) }
-        reloadRemoteBookEntries(localEntries, generation, suppressTransientNetworkErrors = false)
+        workScope.launch {
+            _uiState.update { it.copy(errorMessage = null) }
+            try {
+                repository.syncLibrary()
+                reloadRemoteBookEntries(_uiState.value.bookEntries, reloadGeneration, suppressTransientNetworkErrors = false)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _uiState.update { it.copy(errorMessage = error.syncMessage()) }
+            }
+        }
     }
 
     fun changeSort(sortOption: BookSortOption) {
@@ -107,25 +140,67 @@ internal class BookshelfViewModel : ViewModel {
     }
 
     fun openBook(entry: BookEntry) {
-        if (openBookInFlight) {
-            return
-        }
-        openBookInFlight = true
-        workScope.launch {
+        if (openingBookId == entry.metadata.id) return
+        openBookJob?.cancel()
+        openingBookId = entry.metadata.id
+        val cloud = entry.metadata.epub == null
+        val download = if (cloud) download(entry) else null
+        openBookJob = workScope.launch {
             _uiState.update { it.copy(errorMessage = null) }
             try {
+                download?.await()?.getOrThrow()
                 val bookId = repository.openBook(entry)
-                _uiState.update { it.copy(openReaderBookId = bookId) }
-            } catch (error: Throwable) {
-                _uiState.update {
-                    it.copy(
-                        errorMessage = UiText.Resource(R.string.bookshelf_open_failed).withErrorDetails(error),
-                    )
+                if (cloud) reloadBookEntriesSync()
+                _uiState.update { it.copy(openReaderBookId = bookId, openReaderSkipSync = cloud) }
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                val message = if (cloud) {
+                    error.syncMessage(UiText.Resource(R.string.sync_download_book_failed_format, entry.metadata.displayTitle))
+                } else {
+                    UiText.Resource(R.string.bookshelf_open_failed).withErrorDetails(error)
                 }
+                _uiState.update { it.copy(errorMessage = message) }
             } finally {
-                openBookInFlight = false
+                if (openingBookId == entry.metadata.id) openingBookId = null
             }
         }
+    }
+
+    fun downloadBooks(entries: List<BookEntry>) {
+        val previous = menuDownloads
+        menuDownloads = workScope.launch {
+            previous?.join()
+            val failures = mutableListOf<UiText>()
+            _uiState.update { it.copy(errorMessage = null) }
+            for (entry in entries) {
+                download(entry).await().onFailure { error ->
+                    failures += error.syncMessage(UiText.Resource(R.string.sync_download_book_failed_format, entry.metadata.displayTitle))
+                    _uiState.update { it.copy(errorMessage = UiText.Joined(failures.toList(), "\n\n")) }
+                }
+            }
+            reloadBookEntriesSync()
+        }
+    }
+
+    private fun download(entry: BookEntry): Deferred<Result<Unit>> {
+        downloads[entry.metadata.id]?.let { return it }
+        val download = workScope.async(start = CoroutineStart.LAZY) {
+            _uiState.update { it.copy(remoteImportProgressById = it.remoteImportProgressById + (entry.metadata.id to 0.0)) }
+            try {
+                runCatching {
+                    repository.downloadBook(entry) { progress ->
+                        _uiState.update { it.copy(remoteImportProgressById = it.remoteImportProgressById + (entry.metadata.id to progress)) }
+                    }
+                }
+            } finally {
+                downloads -= entry.metadata.id
+                _uiState.update { it.copy(remoteImportProgressById = it.remoteImportProgressById - entry.metadata.id) }
+            }
+        }
+        downloads[entry.metadata.id] = download
+        download.start()
+        return download
     }
 
     fun importBook(uri: Uri, displayName: String? = null) {
@@ -295,6 +370,16 @@ internal class BookshelfViewModel : ViewModel {
         runLoading(errorPrefix = UiText.Resource(R.string.bookshelf_delete_failed)) {
             try {
                 repository.deleteBook(entry)
+            } finally {
+                reloadBookEntriesSync()
+            }
+        }
+    }
+
+    fun deleteLocalBook(entry: BookEntry) {
+        runLoading(errorPrefix = UiText.Resource(R.string.bookshelf_delete_failed)) {
+            try {
+                repository.deleteLocalBook(entry)
             } finally {
                 reloadBookEntriesSync()
             }
@@ -721,6 +806,7 @@ internal class BookshelfViewModel : ViewModel {
             val validSelectedIds = it.selectedBookIds.intersect(result.entries.mapTo(mutableSetOf()) { entry -> entry.metadata.id })
             it.copy(
                 bookEntries = result.entries,
+                canDeleteLocalBookIds = result.canDeleteLocalBookIds,
                 bookProgressById = result.progressById,
                 coverSourcesById = result.coverSourcesById,
                 shelves = result.shelves,
@@ -740,7 +826,6 @@ internal class BookshelfViewModel : ViewModel {
                 hasLoadedBooks = true,
                 isLoading = false,
                 blockingProgressMessage = null,
-                errorMessage = null,
             )
         }
         reloadRemoteBookEntries(result.entries, generation, suppressTransientNetworkErrors = true)

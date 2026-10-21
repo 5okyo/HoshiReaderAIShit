@@ -22,6 +22,7 @@ import moe.antimony.hoshi.features.bookshelf.BookCoverRecoveryDecoderFactory
 import moe.antimony.hoshi.features.bookshelf.BookCoverFetcher
 import moe.antimony.hoshi.features.bookshelf.BookCoverKeyer
 import moe.antimony.hoshi.features.bookshelf.BookCoverThumbnailStore
+import moe.antimony.hoshi.features.sync.GoogleDriveSyncLifecycle
 import moe.antimony.hoshi.features.diagnostics.installCrashDiagnostics
 import moe.antimony.hoshi.features.diagnostics.NonfatalDiagnosticsLogger
 import moe.antimony.hoshi.features.dictionary.DictionaryAutoUpdateScheduler
@@ -39,6 +40,7 @@ class HoshiApplication : Application(), Configuration.Provider, SingletonImageLo
     @Inject internal lateinit var dictionaryAutoUpdateScheduler: Lazy<DictionaryAutoUpdateScheduler>
     @Inject internal lateinit var updateDownloadStore: UpdateDownloadStore
     @Inject internal lateinit var updateScheduler: Lazy<UpdateScheduler>
+    @Inject internal lateinit var googleDriveSyncLifecycle: Lazy<GoogleDriveSyncLifecycle>
     @Inject internal lateinit var workerFactory: HiltWorkerFactory
     @Inject @IoDispatcher internal lateinit var ioDispatcher: CoroutineDispatcher
     @Inject internal lateinit var bookCoverThumbnailStore: Lazy<BookCoverThumbnailStore>
@@ -56,6 +58,7 @@ class HoshiApplication : Application(), Configuration.Provider, SingletonImageLo
         prepareUpdateStartupState()
         updateScheduler.get().sync()
         dictionaryAutoUpdateScheduler.get().registerProcessForegroundChecks()
+        googleDriveSyncLifecycle.get().register()
     }
 
     override fun newImageLoader(context: Context): ImageLoader =

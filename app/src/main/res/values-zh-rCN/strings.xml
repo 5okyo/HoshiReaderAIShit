@@ -895,6 +895,39 @@
     <string name="sasayaki_transcription_light_description">减少资源占用，转录较慢。</string>
     <string name="sasayaki_transcription_balanced_description">兼顾转录速度与日常使用。</string>
     <string name="sasayaki_transcription_fast_description">优先转录速度，发热可能增加。</string>
+    <string name="statistics_sessions_heading">阅读记录</string>
+    <string name="sync_provider">同步服务</string>
+    <string name="sync_provider_ttu">ッツ/yatsu</string>
+    <string name="sync_hoshi_description">在 Hoshi Reader 设备之间同步书库。</string>
+    <string name="sync_unsupported_format">此书库使用不支持的同步格式。请更新 Hoshi Reader 后再同步。</string>
+    <string name="sync_book_deleted">此书籍已被删除。</string>
+    <string name="sync_book_not_uploaded">此书籍尚未上传。</string>
+    <string name="sync_last_sync">上次同步</string>
+    <string name="sync_now">立即同步</string>
+    <string name="sync_status_choice_needed">需要选择</string>
+    <string name="sync_attach_title">合并书库？</string>
+    <string name="sync_attach_message">Google Drive 上已有书库。合并将整合两个书库中的更改。</string>
+    <string name="sync_attach_upload">上传到 Google Drive</string>
+    <string name="sync_attach_download">从 Google Drive 下载</string>
+    <string name="sync_attach_upload_title">上传到 Google Drive？</string>
+    <string name="sync_attach_download_title">从 Google Drive 下载？</string>
+    <string name="sync_attach_upload_confirmation">这将永久删除 Google Drive 上的书库，并替换为此设备上的书库。不在此设备上的内容都将丢失。</string>
+    <string name="sync_attach_download_confirmation">这将永久删除此设备上的书库，并替换为 Google Drive 上的书库。不在 Google Drive 上的内容都将丢失。</string>
+    <string name="sync_queue">队列</string>
+    <string name="sync_queue_empty">空</string>
+    <string name="sync_queue_all_synced">所有书籍已同步</string>
+    <plurals name="sync_queue_failed">
+        <item quantity="one">%1$d 本失败</item>
+        <item quantity="other">%1$d 本失败</item>
+    </plurals>
+    <string name="sync_download_all_books">下载全部书籍</string>
+    <string name="sync_download_all_books_title">下载全部书籍？</string>
+    <plurals name="sync_download_all_books_confirmation">
+        <item quantity="one">将从 Google Drive 下载 %1$d 本书籍。</item>
+        <item quantity="other">将从 Google Drive 下载 %1$d 本书籍。</item>
+    </plurals>
+    <string name="sync_delete_local">删除本地副本</string>
+    <string name="sync_delete_everywhere">在所有设备上删除</string>
     <string name="tts_tab_voice" comment="TTS panel tab containing source, voice and rate controls.">音源</string>
     <string name="tts_tab_dictionary">文本替换</string>
     <string name="tts_rate_label">引擎语速</string>
@@ -1099,4 +1132,12 @@
     <string name="diagnostics_webview" translatable="false">WebView</string>
     <string name="sasayaki_nakuru_unavailable">此设备不支持 Nakuru。</string>
     <string name="sasayaki_legacy_resources_cleanup">清理已停用的转录资源：%1$s</string>
+    <string name="sync_error_details">查看同步错误</string>
+    <string name="sync_book_failed_format">无法同步“%1$s”。</string>
+    <string name="sync_download_book_failed_format">无法下载“%1$s”。</string>
+    <string name="sync_file_failed_format">无法同步“%1$s”的%2$s。</string>
+    <string name="sync_cleanup_failed_format">无法清理“%1$s”的旧云端文件。</string>
+    <string name="sync_file_epub">EPUB 正文</string>
+    <string name="sync_file_cover">封面图片</string>
+    <string name="sync_file_sasayaki">Sasayaki 匹配结果</string>
 </resources>

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -12,6 +14,10 @@ val rustDebugJniLibsDir = layout.buildDirectory.dir("jniLibs/debug").get().asFil
 val rustReleaseJniLibsDir = layout.buildDirectory.dir("jniLibs/release").get().asFile
 val cargo = System.getenv("HOME") + "/.cargo/bin/cargo"
 val androidNdkHome = System.getenv("ANDROID_NDK_HOME") ?: "/opt/homebrew/share/android-ndk"
+val secrets = Properties().apply {
+    val secretsFile = rootProject.file("secrets.properties")
+    if (secretsFile.isFile) secretsFile.inputStream().use { load(it) }
+}
 val releaseKeystorePath = providers.environmentVariable("ANDROID_KEYSTORE_FILE").orNull
 val releaseKeystorePassword = providers.environmentVariable("ANDROID_KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("ANDROID_KEY_ALIAS").orNull
@@ -84,6 +90,13 @@ android {
     }
 
     buildTypes {
+        configureEach {
+            val key = "HOSHI_GOOGLE_CLIENT_ID_${name.uppercase()}"
+            val clientId = providers.environmentVariable(key).getOrElse(secrets.getProperty(key, "")).trim()
+            buildConfigField("String", "HOSHI_GOOGLE_CLIENT_ID", "\"$clientId\"")
+            manifestPlaceholders["googleOAuthRedirectScheme"] = clientId.split('.').reversed().joinToString(".")
+                .ifEmpty { "moe.antimony.hoshi.$name.oauth" }
+        }
         debug {
             applicationIdSuffix = ".debug"
             manifestPlaceholders["appLabel"] = "Hoshi Debug"
@@ -134,6 +147,9 @@ android {
 }
 
 dependencies {
+    implementation(libs.google.play.services.auth)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.androidx.browser)
     implementation(libs.jsoup)
     coreLibraryDesugaring(libs.desugar.jdk.libs)
     implementation(platform(libs.androidx.compose.bom))

@@ -29,6 +29,7 @@ import moe.antimony.hoshi.features.reader.usesDarkInterface
 import moe.antimony.hoshi.features.reader.usesDarkSystemBarIcons
 import moe.antimony.hoshi.features.sasayaki.SasayakiPlaybackReturnAction
 import moe.antimony.hoshi.features.sasayaki.SasayakiPlaybackReturnBookIdExtra
+import moe.antimony.hoshi.features.sync.SyncAttachPrompt
 import moe.antimony.hoshi.features.update.DownloadedUpdatePrompt
 import moe.antimony.hoshi.navigation.AppShell
 import moe.antimony.hoshi.ui.theme.HoshiReaderTheme
@@ -94,6 +95,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     )
                     DownloadedUpdatePrompt()
+                    SyncAttachPrompt()
                 }
             }
         }

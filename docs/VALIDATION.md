@@ -81,6 +81,48 @@ For reader web asset changes, run the focused JavaScript tests:
 node --test app/src/test/js/*.test.mjs
 ```
 
+## Google Drive OAuth Build Configuration
+
+Copy `secrets.properties.example` to ignored `secrets.properties` and set
+`HOSHI_GOOGLE_CLIENT_ID_DEBUG` and `HOSHI_GOOGLE_CLIENT_ID_RELEASE` to the
+corresponding Android OAuth client IDs. Use the same Google Cloud project as iOS,
+register each build's package and signing certificate, and enable Custom URI
+scheme in each client's advanced settings for browser authorization. These are
+public client IDs; no OAuth client secret is needed. Environment variables with
+the same names override the file.
+
+The release workflow reads the repository secret `HOSHI_GOOGLE_CLIENT_ID_RELEASE`
+and requires it before building. The test/lint workflow needs no OAuth values,
+including for fork pull requests. Browser sign-in reports missing configuration
+when its client ID is absent. Play Services authorization continues to use
+package/signing registration independently.
+
+When changing auth, check both generated `BuildConfig` values and merged manifest
+redirect schemes, including a build with empty environment values. Run
+`GoogleDriveBrowserAuthTest` and `GoogleDriveBrowserAuthActivityTest` on a device
+using a separately built test APK and the explicit instrumentation runner. Their
+token fixtures, DataStore files and intercepted browser launches are test-owned;
+they do not change the user's connection or contact Google. Require `OK (21 tests)`.
+Run the activity tests through the debug caller fixture so callback routing uses
+an app-owned task. Unlock the device and keep its screen on: these tests exercise
+real window-focus callbacks, which cannot complete behind the keyguard.
+Keep the external browser fixture framework-only Java: an
+activity launched in the test APK's own process cannot rely on Kotlin or other
+target-app dependencies being packaged in that APK.
+The tests cover PKCE/state/redirect validation, one-time exchange, cancellation,
+activity recreation, pending-request persistence, token persistence and
+refresh failure handling, original browser-launch errors and OAuth error details.
+`GoogleDriveBrowserTokenTest` uses a local HTTP server to verify form encoding,
+token responses, failures, rejected HTTP redirects and credential-free diagnostics.
+`DriveAuthorizationErrorsTest` verifies visible error details and diagnostic history,
+including nested causes, platform status codes and silent cancellation.
+`GoogleDriveSyncManagerTest` exercises a cold background process, foreground/background
+polling transitions and continued TTU transport availability. `GoogleDriveRetryTest` covers exhausted 403 rate limits and
+recovery on a later worker run; the manager tests also cover mixed permanent and
+transient per-book failures. Worker tests require original failure diagnostics.
+Also verify real Custom Tab sign-in, Back/close cancellation and return to Sync
+settings on a device without Play Services.
+
 ## Nakuru
 
 - Install a debug APK with `adb install -r`, open Resources >
@@ -712,6 +754,11 @@ Validate relevant bookshelf/import changes with:
   missing timestamps. Recent places unknown times last; Title uses natural title
   order. Switch sort while refresh is delayed/offline, then refresh and import a
   remote book; remaining entries must retain the selected ordering.
+- Hoshi cloud-book titles: check long titles wrap to two lines with the cloud
+  icon inline on the first line and the second line using the full card width.
+  Open the delete dialog for an uploaded local book and check Delete Local,
+  Delete Everywhere, and Cancel stack vertically at narrow widths and large
+  font sizes; dismiss without deleting during layout checks.
 - dark and E-ink editable text fields, confirming visible cursors and horizontal
   scrolling for long values.
 - Android-created `Books` and `Dictionaries` `.hoshi` archives restored by iOS
@@ -1168,7 +1215,60 @@ Validate relevant settings/theme changes with:
 
 Validate relevant sync/update/Sasayaki changes with:
 
-- Google Drive Device Code connect/sign-out, clear cached Drive folders/covers,
+- Hoshi sync: verify GIS consent for the installed package/signing certificate and
+  `drive.file` access to the same Hoshi Reader folder as iOS. Cancel the account
+  picker and test a rejected authorization: both must show a localized error
+  dialog and re-enable Connect. Pass every GIS activity result to
+  `getAuthorizationResultFromIntent`, including non-`RESULT_OK` results, so SDK
+  failures are surfaced. On a device without Play Services, Connect must open a
+  browser, return through the build's custom URI scheme and show Connected only
+  after token exchange. Check browser cancellation, denied consent, restart,
+  expired/rejected tokens and local sign-out. A browser login must keep working
+  if Play Services later becomes available. Test first upload,
+  cloud-only download on tap, canceled downloads, Delete Local/Everywhere,
+  offline metadata/bookmark/highlight/shelf/session conflicts, session deletion,
+  reimport generations, live reader updates/deletion, Sasayaki position/matches,
+  sign-out, cache clearing and Books backup restore. Check foreground activation,
+  release 120-second polling/30-second local-edit debounce, debug 5-second
+  polling/2-second debounce, background final pass and
+  network restoration. Unsupported `formatVersion` must block file transfers and
+  cursor advancement until a successful full pass; restart must retain cursor
+  and version skips. Preserve both devices' app data.
+- Sync regressions: edit a session, delete it on another device, let the editor
+  refresh, and verify its draft closes without restoring the deleted record;
+  unrelated refreshes must retain unsaved input. Rename a non-last shelf, reopen
+  the app, and verify order and memberships with sync both off and on. Read
+  offline, background the app, allow process reclamation (do not force-stop),
+  then restore connectivity and verify pending changes upload without reopening.
+  `StatisticsBookViewModelTest`, `SyncSidecarConversionTest`,
+  `GoogleDriveSyncManagerTest`, and `GoogleDriveSyncWorkerTest` cover draft
+  invalidation, persisted shelf order, transient failure/recovery and worker
+  outcomes; authorization/format failures must not loop on automatic retries.
+  For new-book uploads, delay the state publication after the EPUB transfer:
+  background work must stay active until the cloud state references the file.
+  Fail that publication and confirm temporary failures retry with the original
+  diagnostic cause, permanent failures remain visible without automatic retry,
+  and a later successful pass makes the book downloadable. Cover work begun in
+  both the foreground and background, a foreground state pass overlapping the
+  upload, a reader-open sync replacing the publication pass, plus cancellation
+  and stopping sync. Joining an older or targeted pass alone must not count as
+  publishing new file references.
+- Hoshi sync errors: fail a foreground sync, open/download a cloud book, and each
+  library-merge choice. Error details and Diagnostics must retain the original
+  message, nested cause and HTTP status when present. Batch failures retain every
+  failed book and file category; a later rate-limited file must still request a
+  background retry after an earlier permanent failure. Successful downloads and
+  the final bookshelf refresh must not erase failed items. Cancellation produces
+  no error or diagnostic record. `GoogleDriveSyncManagerTest`,
+  `BookshelfViewModelTest` and `SyncErrorDiagnosticsTest` cover these paths.
+- Native Hoshi Drive reauthorization: after a successful connection, remove Hoshi's
+  access in Google account settings and trigger sync. When Google requires consent
+  again, Connect must reappear without signing out first and remain available after
+  app restart. Reconnect and confirm sync resumes. A successful silent token refresh,
+  temporary network failure or cancellation must retain the connection.
+  `GoogleDriveNativeLoginTest` covers persisted state, connection actions and original
+  error details/history using DataStore; real Play Services consent needs device QA.
+- TTU Google Drive Device Code connect/sign-out, clear cached Drive folders/covers,
   remote-only bookshelf list, pull-to-refresh, import, long-press delete,
   transient network behavior, manual import/export result dialogs,
   reader-open import-only behavior, auto-export timing, close/background flush,
