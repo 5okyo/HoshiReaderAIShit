@@ -40,6 +40,27 @@ filters, signing, native packaging, or other release packaging behavior:
 ./gradlew :app:assembleRelease
 ```
 
+For release workflow or preview publisher changes, run `actionlint`, install the Python test
+dependencies with `python3 -m pip install -r tools/tests/requirements.txt`, then run
+`python3 -m unittest discover -s tools/tests -p 'test_*.py'`.
+The narrow actionlint configuration exception covers GitHub's `queue: max`,
+which actionlint 1.7.12 does not yet recognize; the concurrency configuration is
+also checked by the Python tests. Signed APK builds
+must verify both ARM ABIs, the release package/version/signature, embedded checkout
+SHA, and pinned transcription component downloads. Historical formal tags that
+predate build commit metadata may omit the embedded SHA; previews must always
+include it. Preview publication runs only
+after successful push-to-main CI. Each build owns an annotated
+`apk-preview-<short-sha>-<run-id>-<attempt>` tag and a new prerelease, both marked
+`<!-- hoshi-apk-preview -->`. Upload and verify both APKs before publishing, then
+remove previous owned previews and tags. Failure before publication preserves the
+previous downloadable build; a cleanup retry must preserve the new build.
+Check stale commits, incomplete drafts, corrupt uploads, cleanup failures and
+unrelated releases/tags in publisher tests. Never use broad prerelease cleanup:
+formal releases and optional transcription components must remain untouched.
+After the first main push, verify that exactly one published APK preview remains
+and `/releases/latest` still returns the formal release.
+
 For `minSdk` changes, validate both the newly admitted Android version when
 available and an existing supported Android 9+ device path. Preserve app data
 for existing-user checks, compare release APK structure when packaging output
@@ -122,6 +143,48 @@ recovery on a later worker run; the manager tests also cover mixed permanent and
 transient per-book failures. Worker tests require original failure diagnostics.
 Also verify real Custom Tab sign-in, Back/close cancellation and return to Sync
 settings on a device without Play Services.
+
+## About and Support
+
+- Check About in English and Chinese: Android project and Star invitation in their
+  own section, Related projects listing iOS and Desktop, and a separate final group
+  containing Dependencies and Acknowledgements. Compact version/build rows,
+  update actions and storage scan must remain usable. Only Chinese shows the
+  WeChat appreciation row; switching back to English hides the row and its dialog.
+- Open the appreciation image and save directly to the gallery. Verify the PNG
+  in Pictures/Hoshi Reader matches the bundled original and no file picker opens.
+  Android 10+ must not ask for storage permission; Android 8–9 requests write
+  permission only on Save. Denial shows a clear prompt without a fake diagnostic.
+  A failed write must remove its incomplete MediaStore entry. Verify support URLs
+  open the intended GitHub Sponsors and Ko-fi accounts without making a payment.
+- When changing runtime dependencies, check the About list against Gradle, Cargo
+  and native CMake declarations; group AndroidX components by project and include
+  bundled native components.
+- Open Dependencies and Acknowledgements from About and return using the toolbar and system Back;
+  both entries show the same trailing chevron as the Settings About entry.
+  About retains its scroll position; both lists live on their own pages and
+  iOS/Desktop are not duplicated in acknowledgements.
+- Dependency and acknowledgement rows show license names and all open project
+  homepages without expanding inline details. External-link and image-save failures must retain original
+  messages and nested causes in a visible error dialog and diagnostic history.
+- Repeat update/preview checks below after layout changes. A storage scan must
+  not delete anything; cancel its cleanup confirmation when checking on real data.
+
+## Manual Preview Installation
+
+- In About, Get latest preview queries only published APK previews. Check that
+  an identical full commit reports current, while a different commit with the
+  same app version reaches confirmation. Cancel must not download anything.
+- Confirm download while About remains resumed: after verification the system
+  installer opens once. Dismiss it and verify Install remains available. Without
+  install-source permission, grant permission in Android settings and return to
+  install manually. Never uninstall or clear app data for these checks.
+- Leave About or background the app before completion, then return: show an
+  Install action without automatically opening the installer. Restart the app
+  before installing an equal-version preview and confirm its APK remains.
+- Check release lookup, download/checksum and installer failures retain original
+  details in both visible errors and Diagnostics. Verify stable update records,
+  downloads, prompts and background checks remain independent of previews.
 
 ## Nakuru
 
@@ -216,8 +279,12 @@ settings on a device without Play Services.
 - Open Diagnostics immediately after a runtime failure, then reopen after an
   app restart: the operation, time and original cause/stack must remain. The
   overview must show single-line app/WebView metadata values with separate
-  crash, error and process-exit entries (including independent empty states);
-  each list has one scroll surface and opens selectable full details on tap.
+  crash, error and process-exit entries (including independent empty states).
+  The build commit opens the matching full-SHA GitHub source snapshot and uses
+  the same theme link color as About, including after changing the accent. About shows
+  the same short commit without a link; exported diagnostics include the full SHA
+  and snapshot URL. Missing build provenance must not create an invalid link.
+  Each list has one scroll surface and opens selectable full details on tap.
   Return from each list and confirm its navigation state. Save and open Share
   without selecting a recipient from the overview and any record list; exported
   text must include
