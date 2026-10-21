@@ -1,102 +1,46 @@
 # Hoshi Reader Android Agent 指南
 
-Hoshi Reader Android 是 Hoshi Reader 的 Android/Kotlin/Jetpack Compose 原生复刻项目。目标是按聚焦的垂直切片复刻 iOS 用户可见行为。
+Hoshi Reader Android 是使用 Kotlin 和 Jetpack Compose 开发的原生 Android 阅读器。
+本文件负责 agent 的工作方式和文档维护；代码入口与实现契约见架构文档。
 
-## 工作原则
+## 工作入口
 
-- iOS 用户可见行为和 UI 是唯一真源。开始功能切片或行为修复前，先查看 `reference/Hoshi-Reader-iOS` 中的对应实现，并总结交互、状态流和边界行为。
-- 修复问题时不要叠补丁。先对齐 iOS 行为和状态流；只有平台差异确实需要时，才加入最小 Android 侧适配。
-- 未发布功能以当前数据格式和交互为准，不为开发期旧格式增加迁移、兼容分支或面向用户的迁移提示。
-- 涉及 Android 平台能力、权限、SAF、WebView、Media3、WorkManager、Google/Jetpack API、打包、安装或后台行为时，优先查 Android/Google/Jetpack 官方文档确认当前推荐做法。
+- 开始任务先检查 Git 状态，保留无关改动。修改 App 代码前，读取 [通用实现契约](docs/ARCHITECTURE.md#common-implementation-contracts)，再按架构索引查相关领域约束、owner、代码与测试，通过对应 owner 实现改动。涉及边界调整时先在当前任务说明。
+- 日常开发以本次需求和 Android 架构契约为依据，结合当前代码与测试梳理交互、状态流和边界行为；修复问题先定位根因。
+- iOS 功能迁移通过 `sync-ios-upstream` 流程及 `docs/IOS_UPSTREAM_SYNC_QUEUE.md` 推进；迁移和行为对齐任务以 `reference/Hoshi-Reader-iOS` 的对应实现为依据。
+- Android 平台能力、权限、SAF、WebView、Media3、WorkManager、Google/Jetpack API、打包、安装和后台机制，优先查官方文档确认当前推荐做法。
 
-## 工作区与规划产物
+## 文档分工
 
-- 除非用户明确要求，不得创建或使用 Git worktree；直接在用户提供的当前工作区和分支内完成任务。
-- 除非用户明确要求，不得创建、强制跟踪或提交设计/计划文档（包括 `docs/superpowers/specs` 和 `docs/superpowers/plans`），也不得为此创建独立文档提交；默认将计划保留在对话或内置计划状态中。
+以下是仓库跟踪的文档。每类信息集中在对应文档，其他位置通过链接引用。
 
-## 架构基线
+| 文档 | 读者与职责 | 更新触发 |
+| --- | --- | --- |
+| [AGENTS.md](AGENTS.md) | Agent 工作入口、文档治理和仓库级操作规则 | 工作方式、文档分工或维护规则变化 |
+| [README.md](README.md) / [README.zh-CN.md](README.zh-CN.md) | 人类的项目介绍、安装与使用入口 | 用户开始使用项目所需的信息变化 |
+| [CHANGELOG.md](docs/CHANGELOG.md) / [CHANGELOG_ARCHIVE.md](docs/CHANGELOG_ARCHIVE.md) | 人类可快速浏览的版本变化；archive 保存历史 | 用户可感知的 App 行为变化或正式发布 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Agent 的当前代码地图、职责和实现契约，包括错误处理、状态/并发、存储、生命周期与安全边界 | owner、跨层约束、数据/API 契约或检索入口变化 |
+| [VALIDATION.md](docs/VALIDATION.md) | Agent 可复用的测试、自动化、性能测量方法，以及已验证的避坑信息 | 验证方法、fixture/设备限制、证据判定或通用自动化陷阱变化 |
+| [ARCHITECTURE_REFACTORING.md](docs/ARCHITECTURE_REFACTORING.md) | 尚未解决的架构债务与未来方向 | 确认新缺口，或已有目标完成/缩小 |
+| [IOS_UPSTREAM_SYNC_QUEUE.md](docs/IOS_UPSTREAM_SYNC_QUEUE.md) | 当前 iOS upstream 对齐队列 | upstream 评估或切片状态变化 |
+| [TRANSLATING.md](docs/TRANSLATING.md) | 本地化贡献操作说明 | 翻译流程变化 |
 
-### Android 官方推荐
+## 文档维护规则
 
-- UI：Jetpack Compose 和 Material 3。
-- Navigation：使用当前 Navigation3 typed route/back-stack 模式，接入 `AppShell`、`NavDisplay` 和 route key。顶层 tab 使用独立 Nav3 back stack，各 stack 持有自己的 `rememberSaveableStateHolderNavEntryDecorator()` 与 `rememberViewModelStoreNavEntryDecorator()`；不要用 Activity 级 ViewModel scope 代替正确的 tab/route 生命周期。
-- State：ViewModel 暴露不可变 UI state，并通过 `StateFlow` 推送；屏幕 UI 按 state down / events up 组织。
-- Data：repository 负责文件、数据库、辞典、EPUB、网络，以及阻塞工作的 dispatcher 边界；异步使用 Kotlin coroutines，避免阻塞主线程。
-- DI：生产依赖图使用 Hilt；新增依赖优先通过构造函数注入，并通过 Hilt module/qualifier 接入；ViewModel 使用 `@HiltViewModel`；不要新增手写 app container 或在 Composable 中扩散对象图创建逻辑。现有 `HoshiUiDependencies` 只是 lazy Compose 过渡桥，不应手动创建对象图。
-- Platform：Android API 按平台语义和官方文档选择，不机械映射 iOS API。
-- Settings：小型设置和偏好使用 DataStore-backed repository，不在 Composable 中直接读写 DataStore。
-- Settings 首帧：读取持久化配置的设置页必须通过 `SettingsDetailScaffold(state = ...)`，sheet/嵌入面板通过 `SettingsContent`，仅在 `SettingsLoadState.Loaded` 后创建设置控件。首发前使用 `Loading`，读取失败显示可重试错误；不得用 `Settings()`、默认 `stateIn` 值或 `Loaded(默认值)` 冒充已加载。多个必需数据源全部就绪后再显示；已由上层确认的实际值可直接包装为 `Loaded`。`StaticSettingsDetailScaffold` 仅用于静态菜单/操作，不得绕过持久化设置的加载入口。新增或修改设置状态源时补延迟首发、失败重试测试；profile 设置还需覆盖切换后旧请求不回写。
-- Background work：需要跨进程、重启或离开可见状态后仍可靠执行的任务使用 WorkManager；worker 依赖通过 Hilt worker injection 接入，不做手写查找。
-- EPUB import：通过 Android Storage Access Framework 导入到 app-specific storage。
+- 按上表的更新触发维护对应文档，优先原位修订、合并重复和删除失效内容。
+- 长期信息应具体、已验证且可跨会话复用。局部实现和行为用例在代码与测试中维护；单次调查、执行结果和未验证项留在当前任务或 PR。
+- 重构与同步队列保留剩余工作和影响后续决策的取舍，完成项移出队列。
+- 调整文档结构时同步更新导航和引用；中英文 README 的产品事实保持一致。
 
-### Hoshi 项目约束
+### Changelog 写法
 
-- JSON：Kotlin Serialization 或 Moshi。
-- Storage：已有 iOS 兼容 sidecar JSON 必须保持兼容。
-- Reader：保留 WebView 阅读和查词；本地 WebView 资源优先使用 `WebViewAssetLoader` 或仓库已有安全加载路径；不要启用宽泛 file URL 访问，例如 `allowUniversalAccessFromFileURLs`。
-- Reader JS/CSS：长期 reader web 代码放在 `app/src/main/assets/hoshi-web`；不要新增大段 Kotlin 字符串脚本。Kotlin 侧只保留小型 typed command、参数转义、asset 加载、动态配置填充和桥接调用。
-- Reader popup 坐标：`popup.js` 的 `hoshiPopupGeometry` 是 CSS `zoom` 下 popup 坐标换算、滚动位置和元素对齐的唯一入口。popup 代码不得把 `offsetTop` 等未缩放 layout 坐标与 `scrollTop` / `getBoundingClientRect()` 等视觉滚动坐标混用，也不得另写缩放补偿。
-- Reader web 共享语义：`reader-text-semantics.js` 是三种 reader mode 共享的文本 normalization、
-  matchable/raw 计数和 matchable-character 判断入口；`reader-dom-text.js` 是 paginated/continuous
-  共享的 live DOM ruby/text normalization 入口；`reader-media-semantics.js` 是三种 reader mode
-  共享的 image setup 入口，包含 SVG image aspect-ratio 修正、large image block 标记、blur
-  wrapper、tap-to-native-image bridge 和 scoped setup；`reader-layout-semantics.js` 是三种 reader mode
-  在字体和源图片就绪后清理越界 publisher inline-block 和空 strut 的共享入口。VN 可以用当前 screen scope 且不等待 image
-  load，但不要重新引入 VN 私有的同类 image setup。`reader-vn-content-stream.js` 和
-  `reader-vn-range-map.js` 是 VN 专属 runtime primitive，分别拥有 VN source stream、ruby-aware
-  text entry、结构 ID、standalone media unit，以及 VN 渲染屏幕的 raw/highlight range、matchable
-  Sasayaki range 和 source-to-clone offset registration。VN 是特殊分页模式，不要重新引入 VN
-  私有的文本 offset、range、media 分类或 clone offset 实现；也不要把仅 VN 使用的逻辑命名为 shared
-  reader core。除非先落成单独方案和验证计划，不要把 paginated/continuous 的 page/scroll runtime
-  接到 VN content stream instance 或 VN range map。VN 查词文本、完整句子和章内 normalized offset
-  必须从 source stream 解析；current screen clone 只负责点击命中、popup anchor 和当前可见范围，
-  不要用 clone 的截断文本作为查词或制卡语义。
+- 记录普通用户能感知的 App 变化；每条用一句话说明用户得到什么或哪个问题被修复，同一功能合并表达。
+- 用户可见变更更新 `[Unreleased]`。未发布功能的后续调整合并到原 Added/Changed 条目；只有已发布版本中用户可遇到的问题才写 Fixed。
+- 实现/修复 issue 且变化对用户可见时，在条目中引用 issue。
 
-## 真源文档
+## 工作区、验证与提交
 
-- `docs/VALIDATION.md`：必跑构建/测试命令、模拟器数据安全规则、测试数据和长期有效的手工验证矩阵。
-- `docs/CHANGELOG.md`：只记录用户可见 App 变化。用户可见变更需要更新 `[Unreleased]`。
-- `docs/ARCHITECTURE.md`：当前 Android 架构事实。
-- `docs/ARCHITECTURE_REFACTORING.md`：未来架构债务和重构方向。
-- `docs/PERFORMANCE.md`：Reader/WebView 等性能问题的基线测量、热点定位和验证流程。
-- `docs/IOS_UPSTREAM_SYNC_QUEUE.md`：当前 iOS upstream 对齐队列。
-
-只有任务改变了对应文档的真源内容时，才更新该文档。
-
-## 经验沉淀
-
-- 如果 agent 犯错后定位到已验证的正确做法，并且该问题可能在未来新会话中复发，应把最小可执行规则沉淀到对应真源文档。
-- 需要所有会话常驻的仓库级规则才写入 `AGENTS.md`；验证步骤写入 `docs/VALIDATION.md`；当前架构事实写入 `docs/ARCHITECTURE.md`；未来重构方向写入 `docs/ARCHITECTURE_REFACTORING.md`。
-- 沉淀内容必须具体、可执行、低歧义；不要写一次性调查过程、长日志、任务状态、临时 workaround 或只对当前问题成立的细节。
-- 沉淀前先确认现有文档是否已有等价规则；若已有，更新原规则而不是新增重复条目。
-
-## 用户可见 UI
-
-- 本项目不以 Android 无障碍服务或屏幕阅读器（包括 TalkBack）为支持目标。除非用户明确要求，设计、实现、审查和验收时不要为无障碍专门增加或要求 `contentDescription`、Compose accessibility semantics、TalkBack 选中状态或播报、无障碍焦点/遍历顺序及其他屏幕阅读器适配；不得仅因缺少这些适配将变更判定为存在缺陷。已有无障碍专用代码也不属于必须保留的兼容行为，可在确认不影响普通用户交互后删除，以减少代码量和维护负担。
-- 所有用户可见 UI 字符串必须使用 Android 本地化资源。
-- Compose 使用 `stringResource()` / `pluralStringResource()`。
-- 非 UI 层发出的可见消息应使用 `UiText` 或等价资源引用，不应持有 `Context`。
-- 新增或修改可见文案时，同时更新 `app/src/main/res/values/strings.xml` 和 `app/src/main/res/values-zh-rCN/strings.xml`。保持占位符、plural quantity、CDATA/转义和 `translatable="false"` 语义一致。
-- 新增或替换图标时使用 Material Icons、Material vector asset 或明确的品牌资产；不要手绘、自造或临时拼接图标。
-- 用户可见错误通过既有弹窗、Snackbar 或明确错误状态展示，保留本地化的操作/类别说明，并附上原始异常的非空消息和 cause 链；没有消息时至少保留原始异常类型或平台/服务实际返回的错误码，不得自定义 App 错误码或把内部枚举名称当成原始诊断。复用 `ui/ErrorDetails.kt`，不得用固定失败文案、布尔值、枚举或 `getOrNull()` 丢弃失败原因；跨 repository、backend、controller 和状态边界时保留原始 cause。批量操作逐项保留文件/对象名称和失败原因。技术诊断可显示在错误弹窗或错误详情中，不得直接混入正常主 UI 内容，也不得仅记录日志而不给用户查看。
-- 新增或修改错误处理时，补充带具体消息及嵌套 cause 的行为/state-flow 测试，确认错误详情确实到达可见状态；`CancellationException` 必须继续传播，不作为失败显示。成功恢复的可选读取、缓存回退和明确约定的自动离线静默可以保持安静，但不能因此吞掉手动操作或终止失败的原因。异常诊断属于外部数据；应用自行编写的提示仍必须使用本地化资源，凭据和认证头不得加入可见诊断。
-- 遇到的运行错误还必须进入内置诊断历史：`withErrorDetails` 自动记录原始 Throwable；若失败在到达 UI 前转成字符串、枚举或批量结果，先用 `ErrorDiagnosticEvents.buffer.record(operation, originalError)` 保留原始异常和堆栈。平台/服务只返回错误响应而没有 Throwable 时，用 `recordServiceFailure` 记录实际返回的错误详情，不得伪造异常或 App 错误码。后台任务的失败/重试也保留原始原因；取消和普通输入校验不记为运行错误。实时表单校验需要展示原始原因时，使用纯格式化的 `diagnosticMessage()` 组成 `UiText`，不要调用会自动写入历史的 `withErrorDetails`。诊断持久化由 Hilt 注入的 logger 在 IO dispatcher 执行，记录失败不得覆盖或递归记录原业务错误；相关回归测试同时确认可见提示与诊断记录保留原因。
-
-## 领域边界
-
-- 领域事实和当前模块边界以 `docs/ARCHITECTURE.md` 为准；未来拆分方向以 `docs/ARCHITECTURE_REFACTORING.md` 为准。
-- 改动 dictionary、reader、parser、Anki、sync、audio 或 Sasayaki 前，先查对应当前架构边界；除非先记录缺口，否则不要绕过既有 bridge、repository、backend 或 controller 边界。
-- Reader、parser、sync、audio 等用户可见行为先对齐 iOS；Android 平台机制使用 Android/Google/Jetpack 官方做法。
-
-## 测试与提交
-
-- 声明实现完成前，按 `docs/VALIDATION.md` 验证。
-- 除非用户明确允许一次性设备，否则不要运行会清除、重装或卸载 app 数据的 connected Android instrumentation task。
-- 单元测试 fixture 不要依赖被 `.gitignore` 忽略的 `testdata/` 本地文件；CI 需要的样本必须 tracked，或由测试自行构造。
-- 优先写行为、API、state-flow 测试，不写生产源码字符串实现细节测试。只有 manifest、resources、Gradle、权限或 provider 声明等结构化配置，才允许在解析结构后断言。
-- Commit message 使用 Conventional Commits。
-- 完成开发并通过必要验证后，自行提交本次任务相关改动；用户明确要求不提交或保留未提交改动时才不要提交。
-- Changelog 只记录普通用户可感知的 App 变化；不要记录 CI、agent workflow、构建脚本、依赖管理或内部重构。
-- `[Unreleased]` 中未发布功能的后续调整应合并到原 Added/Changed 条目，只有已发布版本中用户可遇到的问题才写 Fixed。
-- 如果实现或修复 GitHub issue，用户可见时在 changelog 条目中引用 issue，并在 commit message 中使用 closing keyword。
-- 小型低风险 issue 修复可直接在 `main` 完成；较大功能、跨模块重构或高风险变更使用 `codex/` 分支。
+- 默认在当前工作区操作；Git worktree 仅在用户明确要求时使用。小型低风险修复可在 `main` 完成；较大功能、跨模块重构或高风险变更使用 `codex/` 分支。
+- 计划默认保留在对话或内置计划状态中；用户明确要求时才创建或提交计划文档。
+- 声明完成前按 `docs/VALIDATION.md` 执行匹配的检查与设备数据保护要求，并报告结果及未验证项。设备/UI 验证由 agent 使用可用工具执行。
+- 完成开发并通过必要验证后，自行提交本次任务相关改动；用户要求不提交或保留未提交改动时除外。Commit message 使用 Conventional Commits；实现或修复 GitHub issue 时使用 closing keyword。
