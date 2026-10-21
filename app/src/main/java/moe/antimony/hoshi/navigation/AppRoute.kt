@@ -47,6 +47,15 @@ sealed interface AppRoute : NavKey {
     data object TtsSettingsRoute : AppRoute
 
     @Serializable
+    data object TtsVoiceSettingsRoute : AppRoute
+
+    @Serializable
+    data object TtsReplacementsSettingsRoute : AppRoute
+
+    @Serializable
+    data object TtsReadingSettingsRoute : AppRoute
+
+    @Serializable
     data class ReaderRoute(
         val bookId: String,
         val skipSyncOnOpen: Boolean = false,

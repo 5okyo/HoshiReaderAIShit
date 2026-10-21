@@ -49,7 +49,9 @@ class TtsLookupPauseDeviceTest {
                     override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences =
                         transform(data.value).also { data.value = it }
                 }
-                val controller = TtsPlaybackController(TtsBookRepository(Dispatchers.IO), TtsRepository(store), audio, connected, scope)
+                val repository = TtsRepository(store)
+                repository.enabled(true)
+                val controller = TtsPlaybackController(TtsBookRepository(Dispatchers.IO), repository, audio, connected, scope)
                 val lookupPaused = CompletableDeferred<Unit>()
                 val nextPlaying = CompletableDeferred<Unit>()
                 var resume: (() -> Unit)? = null

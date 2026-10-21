@@ -8,12 +8,21 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.json.Json
 
 @Serializable
 data class TtsSettings(
+    val enabled: Boolean = false,
     val engine: String = "", @SerialName("rate") val sharedRate: Float = 1f,
     val customSources: List<TtsCustomSource> = emptyList(),
     val online: Map<String, TtsOnlineConfig> = emptyMap(), val pitch: Float = 0f,
@@ -39,6 +48,33 @@ class TtsRepository internal constructor(private val store: androidx.datastore.c
     private val key = stringPreferencesKey("preferences")
     private val json = Json { ignoreUnknownKeys = true }
     val preferences = store.data.map { decode(it[key]) }
+    private val reloadRequests = MutableStateFlow(0)
+    internal val preferencesReloads = reloadRequests.asStateFlow()
+
+    /** A settings retry also recovers readers and other retained routes whose read flow failed. */
+    fun retryPreferences() { reloadRequests.update { it + 1 } }
+
+    suspend fun enabled(enabled: Boolean) {
+        store.edit {
+            val current = decode(it[key])
+            it[key] = json.encodeToString(current.copy(settings = current.settings.copy(enabled = enabled)))
+        }
+        retryPreferences()
+    }
+
+    /** Disabled is a deliberate no-op; real storage/synthesis failures and caller cancellation propagate. */
+    internal suspend fun <T> whileEnabled(action: suspend (TtsPreferences) -> T): T? = try {
+        coroutineScope {
+            val current = preferences.first()
+            if (!current.settings.enabled) return@coroutineScope null
+            val work = async { action(current) }
+            val watcher = launch {
+                preferences.first { !it.settings.enabled }
+                work.cancel(TtsDisabledCancellation())
+            }
+            try { work.await() } finally { watcher.cancel() }
+        }
+    } catch (_: TtsDisabledCancellation) { null }
     private fun decode(value: String?): TtsPreferences {
         val preferences = value?.let { json.decodeFromString<TtsPreferences>(it) } ?: TtsPreferences()
         return preferences.copy(settings = preferences.settings.copy(
@@ -124,3 +160,5 @@ class TtsRepository internal constructor(private val store: androidx.datastore.c
         store.edit { it[key] = json.encodeToString(decode(it[key]).let { old -> old.copy(words = old.words.filterNot { w -> w.id == id }) }) }
     }
 }
+
+private class TtsDisabledCancellation : CancellationException("TTS disabled")

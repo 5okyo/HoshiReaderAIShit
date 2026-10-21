@@ -44,7 +44,7 @@ class TtsPlaybackControllerTest {
 
     @Test fun silentSentencesAdvanceWithoutPlayingEmptyAudioOrAddingPauses() = runTest {
         fixture { controller, output, audio, repository ->
-            repository.settings { TtsSettings(sentencePauseMs = 1000) }; runCurrent()
+            repository.settings { TtsSettings(enabled = true, sentencePauseMs = 1000) }; runCurrent()
             val sentences = controller.state.value.sentences
             audio.silent = { it != sentences.last() }
             val presented = mutableListOf<Pair<TtsSentence, Boolean>>()
@@ -94,7 +94,7 @@ class TtsPlaybackControllerTest {
 
     @Test fun lookupDuringSentenceDelayResumesNextSentence() = runTest {
         fixture { controller, output, _, repository ->
-            repository.settings { TtsSettings(sentencePauseMs = 1000) }; runCurrent()
+            repository.settings { TtsSettings(enabled = true, sentencePauseMs = 1000) }; runCurrent()
             controller.play(); runCurrent()
             output.onEnded(); runCurrent()
             advanceTimeBy(100); runCurrent()
@@ -283,7 +283,92 @@ class TtsPlaybackControllerTest {
         } finally { backgroundScope.cancel(); runCurrent(); Dispatchers.resetMain() }
     }
 
-    private class MemoryStore(initial: Preferences = emptyPreferences()) : DataStore<Preferences> {
+    @Test fun disablingStopsPlaybackAndInvalidatesLookupResumeWithoutAutoRestart() = runTest {
+        fixture { controller, output, audio, repository ->
+            controller.play(); runCurrent()
+            val resume = controller.pauseForLookup()
+            repository.enabled(false); runCurrent()
+            val count = audio.requests.size
+            controller.play(); controller.startAt(0, 0); resume(); runCurrent()
+            assertFalse(controller.state.value.started)
+            assertFalse(controller.state.value.playing)
+            assertTrue(output.prepared.isEmpty())
+            assertEquals(count, audio.requests.size)
+            repository.enabled(true); runCurrent()
+            resume(); runCurrent()
+            assertFalse(controller.state.value.started)
+            controller.load("book", book, false)
+            controller.startAt(0, 0); runCurrent()
+            assertTrue(controller.state.value.playing)
+        }
+    }
+
+    @Test fun disablingDuringPreparationRejectsLateAudioAndCancelsPrefetch() = runTest {
+        fixture { controller, output, audio, repository ->
+            val release = CompletableDeferred<Unit>()
+            audio.synthesize = { withContext(NonCancellable) { release.await() } }
+            controller.play(); runCurrent()
+            assertTrue(controller.state.value.preparing)
+            repository.enabled(false); runCurrent()
+            release.complete(Unit); runCurrent()
+            output.onEnded(); controller.repeat(); runCurrent()
+            assertFalse(controller.state.value.started)
+            assertFalse(controller.state.value.preparing)
+            assertEquals(0, output.playCount)
+            assertTrue(output.prepared.isEmpty())
+        }
+    }
+
+    @Test fun noPlaybackBeforeFirstPreferencesAndFailedReadCanBeRetried() = runTest {
+        Dispatchers.setMain(UnconfinedTestDispatcher(testScheduler))
+        try {
+            val gate = CompletableDeferred<Unit>()
+            var failure: Throwable? = java.io.IOException("preferences unavailable")
+            val store = object : DataStore<Preferences> {
+                override val data = kotlinx.coroutines.flow.flow {
+                    gate.await()
+                    failure?.let { throw it }
+                    emit(preferencesOf(stringPreferencesKey("preferences") to """{"settings":{"enabled":true}}"""))
+                    awaitCancellation()
+                }
+                override suspend fun updateData(transform: suspend (Preferences) -> Preferences): Preferences = error("Read only fixture")
+            }
+            val output = Output()
+            val audio = Audio()
+            val controller = TtsPlaybackController(TtsBookRepository(UnconfinedTestDispatcher(testScheduler)),
+                TtsRepository(store), audio, output, backgroundScope)
+            controller.load("book", book, false)
+            controller.startAt(0, 0); runCurrent()
+            assertEquals(0, audio.requests.size)
+            assertFalse(controller.state.value.started)
+            gate.complete(Unit); runCurrent()
+            assertNotNull(controller.state.value.error)
+            failure = null
+            controller.retryPreferences(); runCurrent()
+            controller.load("book", book, false)
+            controller.startAt(0, 0); runCurrent()
+            assertTrue(controller.state.value.playing)
+            assertEquals(1, output.playCount)
+            controller.stop()
+        } finally { backgroundScope.cancel(); runCurrent(); Dispatchers.resetMain() }
+    }
+
+    @Test fun disablingWhilePlayingCancelsPendingPrefetch() = runTest {
+        fixture { controller, output, audio, repository ->
+            var cancelled = false
+            audio.synthesize = { sentence ->
+                if (sentence.start > 0) try { awaitCancellation() } finally { cancelled = true }
+            }
+            controller.play(); runCurrent()
+            assertEquals(1, output.playCount)
+            repository.enabled(false); runCurrent()
+            assertTrue(cancelled)
+            assertFalse(controller.state.value.started)
+            assertTrue(output.prepared.isEmpty())
+        }
+    }
+
+    private class MemoryStore(initial: Preferences = preferencesOf(stringPreferencesKey("preferences") to """{"settings":{"enabled":true}}""")) : DataStore<Preferences> {
         override val data = MutableStateFlow(initial)
         override suspend fun updateData(transform: suspend (t: Preferences) -> Preferences): Preferences = transform(data.value).also { data.value = it }
     }
@@ -348,7 +433,7 @@ class TtsPlaybackControllerTest {
         } finally { fixtureScope.cancel(); runCurrent(); Dispatchers.resetMain() }
     }
     private val preferencesKey = stringPreferencesKey("preferences")
-    private fun prefetchPreferences(count: Int) = preferencesOf(preferencesKey to """{"settings":{"prefetchSentences":$count}}""")
+    private fun prefetchPreferences(count: Int) = preferencesOf(preferencesKey to """{"settings":{"enabled":true,"prefetchSentences":$count}}""")
     private val shortSentencesBook = EpubBook("Short sentences", chapters = listOf(EpubChapter("one", "one.xhtml",
         "application/xhtml+xml", "<p>一。二。三。四。五。六。七。八。九。十。</p>")))
 
@@ -461,7 +546,7 @@ class TtsPlaybackControllerTest {
     }
 
     @Test fun restoredPlaybackRateAppliesBeforePlaybackStarts() = runTest {
-        fixture(store = MemoryStore(preferencesOf(preferencesKey to """{"settings":{"playbackRate":2.5}}"""))) { controller, output, _, _ ->
+        fixture(store = MemoryStore(preferencesOf(preferencesKey to """{"settings":{"enabled":true,"playbackRate":2.5}}"""))) { controller, output, _, _ ->
             assertEquals(2.5f, output.appliedRate)
             controller.play(); runCurrent()
             assertEquals(2.5f, output.appliedRate)
@@ -665,7 +750,7 @@ class TtsPlaybackControllerTest {
     }
     @Test fun sentencePauseWaitsBetweenAutomaticSentencesAndStopCancelsIt() = runTest {
         fixture { controller, output, _, repository ->
-            repository.settings { TtsSettings(sentencePauseMs = 1000) }; runCurrent()
+            repository.settings { TtsSettings(enabled = true, sentencePauseMs = 1000) }; runCurrent()
             controller.play(); runCurrent()
             output.onEnded(); runCurrent()
             assertEquals(1, output.playCount)
@@ -682,7 +767,7 @@ class TtsPlaybackControllerTest {
     }
     @Test fun resumingDuringSentencePauseStartsNextSentenceAndManualNavigationDoesNotWait() = runTest {
         fixture { controller, output, _, repository ->
-            repository.settings { TtsSettings(sentencePauseMs = 1000) }; runCurrent()
+            repository.settings { TtsSettings(enabled = true, sentencePauseMs = 1000) }; runCurrent()
             controller.play(); runCurrent()
             output.onEnded(); runCurrent()
             controller.pause(); controller.play(); runCurrent()
@@ -724,7 +809,7 @@ class TtsPlaybackControllerTest {
     @Test fun changingVoicePausesAndNextPlayUsesNewSettings() = runTest {
         fixture { controller, output, _, repository ->
             controller.play(); runCurrent()
-            repository.settings { TtsSettings().withVoice("new") }; runCurrent()
+            repository.settings { TtsSettings(enabled = true, ).withVoice("new") }; runCurrent()
             assertFalse(controller.state.value.playing)
             assertTrue(output.prepared.isEmpty())
             controller.play(); runCurrent()
@@ -734,7 +819,7 @@ class TtsPlaybackControllerTest {
     @Test fun synthesisOptionsPauseAndInvalidatePreparedAudio() = runTest {
         fixture { controller, output, _, repository ->
             controller.play(); runCurrent()
-            repository.settings { TtsSettings(pitch = 3f, parameters = mapOf("" to TtsSynthesisOptions(volume = -10f))) }; runCurrent()
+            repository.settings { TtsSettings(enabled = true, pitch = 3f, parameters = mapOf("" to TtsSynthesisOptions(volume = -10f))) }; runCurrent()
             assertFalse(controller.state.value.playing)
             assertTrue(output.prepared.isEmpty())
             controller.play(); runCurrent()

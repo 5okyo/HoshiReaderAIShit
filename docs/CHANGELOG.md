@@ -59,7 +59,14 @@ Historical release notes before v1.3.0 live in [CHANGELOG_ARCHIVE.md](CHANGELOG_
   Microsoft Translator, Google Cloud and Google Translate online sources, plus multiple named
   self-hosted OpenAI Compatible and VITS Simple API servers, with a separate
   TTS panel styled like Sasayaki, with compact playback controls and Voice,
-  Replacements and Settings tabs. Source and Voice share a compact card with grouped,
+  Replacements and Settings tabs. TTS defaults off and can only be enabled or disabled
+  from its Settings page. That page shows only the master switch while off, and
+  separate Voice, Replacements and Settings navigation entries while on, with
+  card spacing consistent with the other Settings pages.
+  Turning TTS off hides its reader and popup controls and text-replacement action,
+  stops speech without deleting configuration, and omits synthesized Anki sentence
+  audio while still allowing card creation and associated audiobook audio.
+  Source and Voice share a compact card with grouped,
   scrolling bottom selection panels. Voices retain their original names and show their
   online/offline requirement; installed third-party engines remain available. Source selection
   includes cloud credential configuration, with system TTS settings always available as

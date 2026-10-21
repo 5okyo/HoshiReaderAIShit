@@ -3,6 +3,11 @@ package moe.antimony.hoshi.features.tts
 import android.content.Context
 import android.view.KeyEvent
 import androidx.compose.ui.Modifier
+import androidx.navigation3.runtime.NavEntry
+import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.ui.NavDisplay
+import androidx.compose.ui.test.junit4.StateRestorationTester
+import moe.antimony.hoshi.navigation.AppRoute
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.datastore.core.DataStore
@@ -48,6 +53,7 @@ class TtsPanelStateTest {
             return transform(stored.value).also { stored.value = it }
         }
     }
+    private val restoration = StateRestorationTester(compose)
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val reading = MemoryStore()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -63,10 +69,10 @@ class TtsPanelStateTest {
     private lateinit var speech: MemoryStore
     private val configMessage get() = context.getString(R.string.tts_configuration_error)
 
-    private fun panel(system: Boolean = false, reader: Boolean = false, online: Boolean = false, discovery: CountDownLatch? = null, storageGate: CompletableDeferred<Unit>? = null, editor: Boolean = false) {
+    private fun panel(system: Boolean = false, reader: Boolean = false, online: Boolean = false, discovery: CountDownLatch? = null, storageGate: CompletableDeferred<Unit>? = null, editor: Boolean = false, home: Boolean = false, enabled: Boolean = true) {
         val source = if (discovery != null) "custom:manual" else if (system) androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("ttsEngine").orEmpty() else if (online) TtsOnlineSource.Edge.id else TtsOnlineSource.GoogleCloud.id
         val profiles = if (discovery == null) "" else """, "routingBySource":{"custom:manual":{"narration":"sample"}}, "customSources":[{"id":"custom:manual","name":"Local","baseUrl":"http://127.0.0.1:8088/v1","model":"irodori-tts","voiceIds":["neutral","bright"]}]"""
-        speech = MemoryStore(preferencesOf(stringPreferencesKey("preferences") to """{"settings":{"engine":"$source"$profiles}}"""))
+        speech = MemoryStore(preferencesOf(stringPreferencesKey("preferences") to """{"settings":{"enabled":$enabled,"engine":"$source"$profiles}}"""))
         speech.readGate = storageGate
         val repository = TtsRepository(speech)
         val cipher = TtsCredentialCipher(Dispatchers.IO)
@@ -100,13 +106,31 @@ class TtsPanelStateTest {
                 TtsPlaybackController(books, repository, audio, output, scope), context)
             models.put("fixture", model)
         }
-        compose.setContent { HoshiReaderTheme(darkTheme = false, dynamicColor = false) {
+        restoration.setContent { HoshiReaderTheme(darkTheme = false, dynamicColor = false) {
             if (panelVisible.value) {
-                if (editor) TtsWordEditor(model, TtsWord("fixture", "猫", "ねこ"), null, null, { panelVisible.value = false })
+                if (home) {
+                    val stack = rememberNavBackStack(AppRoute.TtsSettingsRoute)
+                    NavDisplay(backStack = stack, onBack = { if (stack.size > 1) stack.removeLastOrNull() },
+                        entryProvider = { route -> NavEntry(route) {
+                            when (route) {
+                                AppRoute.TtsSettingsRoute -> TtsSettingsView({}, { section -> stack.add(when (section) {
+                                    TtsSettingsSection.Voice -> AppRoute.TtsVoiceSettingsRoute
+                                    TtsSettingsSection.Replacements -> AppRoute.TtsReplacementsSettingsRoute
+                                    TtsSettingsSection.Reading -> AppRoute.TtsReadingSettingsRoute
+                                }) }, viewModel = model)
+                                else -> TtsSettingsSectionView(when (route) {
+                                    AppRoute.TtsVoiceSettingsRoute -> TtsSettingsSection.Voice
+                                    AppRoute.TtsReplacementsSettingsRoute -> TtsSettingsSection.Replacements
+                                    else -> TtsSettingsSection.Reading
+                                }, { if (stack.size > 1) stack.removeLastOrNull() }, model)
+                            }
+                        } })
+                } else if (editor) TtsWordEditor(model, TtsWord("fixture", "猫", "ねこ"), null, null, { panelVisible.value = false })
                 else TtsPanel(model, null, if (reader) ({ model.playback.play() }) else null, Modifier)
             }
         } }
         if (storageGate != null) return
+        if (home) { compose.waitForIdle(); return }
         if (discovery != null) {
             compose.waitUntil(5_000) { discoveryStarted.get() }
             return
@@ -116,6 +140,61 @@ class TtsPanelStateTest {
     }
 
     @After fun dispose() { compose.runOnUiThread { models.clear(); scope.cancel() } }
+
+    @Test fun settingsHomeOnlyShowsSwitchUntilEnabledAndNeverDiscoversVoices() {
+        panel(home = true, enabled = false, online = true)
+        compose.onNodeWithText(context.getString(R.string.tts_enabled)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_voice)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).assertDoesNotExist()
+        compose.onNode(isToggleable()).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_voice)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).assertIsDisplayed()
+        Assert.assertEquals(0, onlineRequests)
+        compose.onNode(isToggleable()).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).assertDoesNotExist()
+        Assert.assertEquals(0, onlineRequests)
+    }
+
+    @Test fun settingsEntriesNavigateAndRestoreWithoutTabsOrGlobalSwitchInChildren() {
+        panel(home = true)
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_add_word)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_voice)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.tts_enabled)).assertDoesNotExist()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithText(context.getString(R.string.tts_add_word)).assertIsDisplayed()
+        androidx.test.espresso.Espresso.pressBack()
+        compose.onNodeWithText(context.getString(R.string.tts_enabled)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_use_ruby)).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).assertDoesNotExist()
+        androidx.test.espresso.Espresso.pressBack()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_voice)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.tts_enabled)).assertDoesNotExist()
+    }
+
+    @Test fun delayedSettingsHomeDoesNotShowDefaultSwitch() {
+        val gate = CompletableDeferred<Unit>()
+        panel(home = true, storageGate = gate)
+        compose.onNodeWithText(context.getString(R.string.tts_enabled)).assertDoesNotExist()
+        compose.runOnIdle { gate.complete(Unit) }
+        compose.onNodeWithText(context.getString(R.string.tts_enabled)).assertIsDisplayed()
+        compose.onNode(isToggleable()).assertIsOn()
+    }
+
+    @Test fun settingsHomeShowsWriteFailureAndKeepsSavedSwitchUntilRetrySucceeds() {
+        panel(home = true, enabled = false)
+        compose.runOnIdle { speech.failWrites = true }
+        compose.onNode(isToggleable()).performClick()
+        compose.onNode(isToggleable()).assertIsOff()
+        compose.onNodeWithText("Fixture write failure", substring = true).assertIsDisplayed()
+        compose.runOnIdle { speech.failWrites = false }
+        compose.onNode(isToggleable()).performClick()
+        compose.onNode(isToggleable()).assertIsOn()
+        compose.onNodeWithText("Fixture write failure", substring = true).assertDoesNotExist()
+    }
 
     @Test fun delayedStoredPreferencesDoNotRenderDefaultSettingsControls() {
         val gate = CompletableDeferred<Unit>()
@@ -188,7 +267,7 @@ class TtsPanelStateTest {
 
     @Test fun rubyWriteFailureIsShownInSettingsAndDoesNotOverwriteSourceFailure() {
         panel()
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
         compose.runOnIdle { speech.failWrites = true }
         compose.onAllNodes(isToggleable()).onFirst().performClick()
         compose.waitUntil(5_000) { model.readingError.value?.failure == TtsFailure.Storage }
@@ -204,17 +283,17 @@ class TtsPanelStateTest {
     @Test fun rubySwitchDefaultsOnAndRetainsItsOwnSettingAcrossTabsAndPanelReopen() {
         panel(online = true)
         val shared = model.readingSettings.value
-        compose.onNodeWithText("Settings").performClick()
-        compose.onNodeWithText("Use Ruby readings").assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_use_ruby)).assertIsDisplayed()
         compose.onAllNodes(isToggleable()).onFirst().assertIsOn().performClick()
         compose.waitUntil(5_000) { model.preferences.value?.settings?.useRubyReadings == false }
         compose.onAllNodes(isToggleable()).onFirst().assertIsOff()
-        compose.onNodeWithText("Replacements").performClick()
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
         compose.onAllNodes(isToggleable()).onFirst().assertIsOff()
         compose.runOnIdle { panelVisible.value = false }
         compose.runOnIdle { panelVisible.value = true }
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
         compose.onAllNodes(isToggleable()).onFirst().assertIsOff()
         compose.runOnIdle { Assert.assertEquals(shared, model.readingSettings.value) }
     }
@@ -239,14 +318,14 @@ class TtsPanelStateTest {
 
     @Test fun savingNewSourceSelectsItAndLoadsItsVoicesWithoutStartingPlayback() {
         panel(online = true)
-        compose.onNodeWithText("Edge TTS").performClick()
-        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText("Add service"))
-        compose.onNodeWithText("Add service").performClick()
-        compose.onNodeWithText("Service name").performTextReplacement("New local server")
-        compose.onNodeWithText("API base URL").performTextReplacement("http://127.0.0.1:8088/v1")
-        compose.onNodeWithText("Model ID").performScrollTo().performTextReplacement("tts")
-        compose.onNodeWithText("Available voice IDs").performScrollTo().performTextReplacement("neutral\nbright")
-        compose.onNodeWithText("Save").performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_source_edge)).performClick()
+        compose.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(context.getString(R.string.tts_add_service)))
+        compose.onNodeWithText(context.getString(R.string.tts_add_service)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_service_name)).performTextReplacement("New local server")
+        compose.onNodeWithText(context.getString(R.string.tts_service_url)).performTextReplacement("http://127.0.0.1:8088/v1")
+        compose.onNodeWithText(context.getString(R.string.tts_service_model)).performScrollTo().performTextReplacement("tts")
+        compose.onNodeWithText(context.getString(R.string.tts_service_voice_ids)).performScrollTo().performTextReplacement("neutral\nbright")
+        compose.onNodeWithText(context.getString(R.string.action_save)).performClick()
         compose.waitUntil(5_000) { model.preferences.value?.settings?.engine?.startsWith("custom:") == true && model.catalog.value?.voices?.any { it.id == "neutral" } == true }
         compose.onNodeWithText("New local server").assertIsDisplayed()
         compose.runOnIdle { Assert.assertEquals(0, playCount); Assert.assertEquals(TtsPreviewState.Idle, model.previewState.value) }
@@ -254,8 +333,8 @@ class TtsPanelStateTest {
 
     @Test fun manualVoiceRefreshUpdatesCachedVoicesAndRetainsThemAfterFailure() {
         panel(online = true)
-        compose.onNodeWithText("Automatic").performClick()
-        val refresh = compose.onNodeWithText("Refresh voices")
+        compose.onNodeWithText(context.getString(R.string.tts_system_default)).performClick()
+        val refresh = compose.onNodeWithText(context.getString(R.string.tts_refresh_voices))
         refresh.assertIsDisplayed()
         val gate = CountDownLatch(1)
         try {
@@ -288,13 +367,13 @@ class TtsPanelStateTest {
     @Test fun sourceFailureStaysNearVoiceCardAndDoesNotLeakIntoOtherTabs() {
         panel()
         val error = compose.onNodeWithText(configMessage).fetchSemanticsNode().boundsInRoot
-        val rate = compose.onNodeWithText("Engine speech rate").fetchSemanticsNode().boundsInRoot
+        val rate = compose.onNodeWithText(context.getString(R.string.tts_rate_label)).fetchSemanticsNode().boundsInRoot
         Assert.assertTrue(error.bottom < rate.top)
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
         compose.onNodeWithText(configMessage).assertDoesNotExist()
-        compose.onNodeWithText("Replacements").performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).performClick()
         compose.onNodeWithText(configMessage).assertDoesNotExist()
-        compose.onNode(hasText("Voice") and hasClickAction() and SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab)).performClick()
+        compose.onNode(hasText(context.getString(R.string.tts_tab_voice)) and hasClickAction() and SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab)).performClick()
         compose.onNodeWithText(configMessage).assertExists()
     }
 
@@ -306,7 +385,7 @@ class TtsPanelStateTest {
         compose.runOnIdle { model.settings { it.copy(playbackRate = 1.5f) } }
         compose.waitUntil(5_000) { model.preferences.value?.settings?.playbackRate == 1.5f }
         compose.runOnIdle { Assert.assertEquals(TtsPreviewState.Playing, model.previewState.value) }
-        compose.onNodeWithText("Stop preview").performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_stop_preview)).performClick()
         compose.runOnIdle { Assert.assertEquals(TtsPreviewState.Idle, model.previewState.value) }
         compose.runOnIdle { model.preview(TtsSentence(0, 0, 0, "はい。"), null) }
         compose.waitUntil(15_000) { model.previewState.value == TtsPreviewState.Idle }
@@ -336,7 +415,7 @@ class TtsPanelStateTest {
         fun controls() = compose.onAllNodes(hasClickAction() and SemanticsMatcher.expectValue(
             androidx.compose.ui.semantics.SemanticsProperties.Role,
             androidx.compose.ui.semantics.Role.Button)).fetchSemanticsNodes().filter {
-            it.boundsInRoot.bottom < compose.onNodeWithText("Replacements").fetchSemanticsNode().boundsInRoot.top
+            it.boundsInRoot.bottom < compose.onNodeWithText(context.getString(R.string.tts_tab_dictionary)).fetchSemanticsNode().boundsInRoot.top
         }.sortedBy { it.boundsInRoot.left }
         Assert.assertEquals(4, controls().size)
         val nextId = controls().last().id
@@ -361,13 +440,13 @@ class TtsPanelStateTest {
         panel()
         compose.runOnIdle { reading.failWrites = true; model.readingSettings { it.copy(autoScroll = false) } }
         compose.waitUntil(5_000) { model.readingError.value?.failure == TtsFailure.Storage }
-        compose.onNodeWithText("Settings").performClick()
+        compose.onNodeWithText(context.getString(R.string.settings_title)).performClick()
         compose.onNodeWithText(context.getString(R.string.tts_storage_error), substring = true).assertExists()
         compose.onNodeWithText(configMessage).assertDoesNotExist()
         compose.runOnIdle { model.preview(TtsSentence(0, 0, 0, "日本語です。"), null) }
         compose.waitUntil(5_000) { model.previewState.value == TtsPreviewState.Idle && model.error.value?.failure == TtsFailure.Configuration }
-        compose.onNode(hasText("Voice") and hasClickAction() and SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab)).performClick()
-        compose.onNodeWithText("Preview voice").assertIsEnabled()
+        compose.onNode(hasText(context.getString(R.string.tts_tab_voice)) and hasClickAction() and SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Tab)).performClick()
+        compose.onNodeWithText(context.getString(R.string.tts_preview_voice)).assertIsEnabled()
         compose.onNodeWithText(configMessage).assertExists()
         compose.onNodeWithText(context.getString(R.string.tts_storage_error), substring = true).assertDoesNotExist()
     }

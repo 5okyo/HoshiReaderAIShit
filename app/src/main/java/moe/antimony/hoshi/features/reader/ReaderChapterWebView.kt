@@ -102,6 +102,7 @@ internal fun ChapterWebView(
     onReaderInteraction: () -> Unit,
     onImageTapped: (String) -> Unit,
     onHighlightChanged: (HighlightColor, String, ReaderHighlightResult) -> Unit,
+    ttsEnabled: Boolean = false,
     onTtsReplacementSelected: (ReaderSelectionData) -> Unit = {},
     readerPopupBridgeHolder: ReaderLookupPopupBridgeCallbackHolder,
     readerPopupResourceHandler: ReaderLookupPopupResourceHandler,
@@ -321,6 +322,7 @@ internal fun ChapterWebView(
         },
         update = { webView ->
             if (webView.isReleased) return@AndroidView
+            webView.ttsEnabled = ttsEnabled
             webView.updateNativePopupTheme(nativePopupDark, nativePopupEInk, nativePopupSurfaces.overlay.toArgb(), nativePopupSurfaces.outline.toArgb())
             fun selectAt(x: Float, y: Float, onBlankTap: () -> Unit) {
                 val density = webView.resources.displayMetrics.density
@@ -625,12 +627,19 @@ internal class HoshiReaderWebView(context: Context) : HoshiWebView(context) {
     }
 
     var onHighlightChanged: (HighlightColor, String, ReaderHighlightResult) -> Unit = { _, _, _ -> }
+    var ttsEnabled: Boolean = false
+        set(value) {
+            if (field == value) return
+            field = value
+            nativeSelectionActionMode?.invalidate()
+        }
     var onTtsReplacementSelected: (ReaderSelectionData) -> Unit = {}
     fun captureTtsReplacementSelection(mode: ActionMode) {
+        if (!ttsEnabled) return
         evaluateJavascript(ReaderSelectionCommand.NativeContext.source) { result ->
             val selection = ReaderSelectionBridgePayload.fromJson(result.orEmpty()) ?: return@evaluateJavascript
             mode.finish()
-            onTtsReplacementSelected(selection)
+            if (ttsEnabled) onTtsReplacementSelected(selection)
         }
     }
     private var readerTouchListener: View.OnTouchListener? = null
@@ -1050,7 +1059,8 @@ private class ReaderHighlightActionModeCallback(
     }
 
     private fun addHighlightMenu(menu: Menu) {
-        if (menu.findItem(0x484920) == null) menu.add(ReaderHighlightSelectionMenu.groupId, 0x484920, 1, R.string.tts_replace).setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
+        if (!webView.ttsEnabled) menu.removeItem(0x484920)
+        else if (menu.findItem(0x484920) == null) menu.add(ReaderHighlightSelectionMenu.groupId, 0x484920, 1, R.string.tts_replace).setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM)
         if (menu.findItem(ReaderHighlightSelectionMenu.parentItemId) != null) return
         ReaderHighlightSelectionMenu.actionModeItems.forEach { item ->
             menu.add(

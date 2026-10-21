@@ -969,13 +969,23 @@ QA matrices live in `docs/VALIDATION.md`.
 
 ## Japanese TTS
 
-- `features/tts` is an independent Hilt feature. `TtsRepository` persists source,
+- `features/tts` is an independent Hilt feature. `TtsRepository` persists the default-off
+  global `enabled` switch and source,
   Japanese voice, engine speech rate, independent Hoshi playback speed, pitch, provider parameters, playback sentence delay, prefetch
   depth, named self-hosted server profiles, the global `useRubyReadings` flag (default true), and scoped text-replacement entries in the `japanese_tts`
   Preferences DataStore. It does not extend Sasayaki
   sidecars or sync payloads. UI events submit setting transforms; the repository applies
   them to the latest preferences inside one DataStore transaction, so independent edits
   do not replace newer settings with a captured UI snapshot.
+  The master switch is only exposed by the TTS settings home. Reader requires a
+  confirmed enabled preference before exposing TTS menus, popup/playback controls or
+  native-selection replacement actions. The singleton playback controller observes
+  the switch and stops its session, cancels preparation/prefetch and invalidates lookup
+  resume callbacks when disabled. Repository-owned preference retry requests resubscribe
+  every retained TTS ViewModel and the controller, including when recovery occurs on another tab.
+  `TtsRepository.whileEnabled` gates and cancels preview/export/catalog work;
+  disabled work returns no result, while real failures and caller cancellation propagate.
+  Turning off preserves configuration; turning on does not resume playback.
   `routingBySource` owns voice selection, including when dialogue routing is off;
   `TtsSettings.voice` is derived from its narration entry. Custom profiles own their rate;
   installed/built-in sources share the engine speech rate.
@@ -1234,12 +1244,16 @@ QA matrices live in `docs/VALIDATION.md`.
   sentence. During lookup auto-pause, the button retains its pause icon and cancels
   pending auto-resume when pressed. Reader-initiated playback
   errors open the TTS panel so its existing error/recovery controls remain accessible.
-- Reader only offers the independent TTS sheet when no audiobook is associated.
+- Reader only offers the independent TTS sheet when TTS is enabled and no audiobook is associated.
   Its fixed sentence controls and Voice/Replacements/Settings tabs use `ReaderBottomPanel`
   and `ReaderSheetControls`, without book metadata or sentence previews. The segmented tabs, group card,
   switch row and slider row in `ReaderSheetControls` are also used by Sasayaki, including shared
-  surface roles and e-ink outlines. TTS Settings uses the same tab content with its
-  own settings scaffold; the replacement list is lazy and keeps playback controls
+  surface roles and e-ink outlines. TTS Settings home shows its master switch and,
+  only when enabled, three entries opening typed Navigation3 Voice, Replacements and
+  Reading settings routes. The child routes reuse the panel content without tabs or a
+  master switch, and retain route-scoped ViewModels and settings load gates. Only the
+  Voice content refreshes voice catalogs on resume; the replacement list is lazy
+  and keeps playback controls
   outside its scroll area. Additional provider choices use anchored `HoshiDropdownMenu`
   rows. Source and Voice share one compact card, with independent
   48 dp touch rows opening lazy selection lists in `TtsSelectionSheet`, which reuses
@@ -1291,8 +1305,12 @@ QA matrices live in `docs/VALIDATION.md`.
   routes to the active source: TTS replay stops after one sentence, toggle can cancel
   lookup auto-resume, and play-forward closes the popup. Dictionary child popups have
   no book source anchor and do not expose TTS controls. Audiobook controls remain unchanged.
+- When no audiobook is associated and TTS is disabled, Reader marks the mining context
+  `sentenceAudioSuppressed` and leaves sentence audio empty. Anki skips its required-audio
+  check only for this explicit policy; ordinary missing audio and upload failures still fail.
+  Associated audiobook exports and the independent `{sasayaki-audio}` field keep their behavior.
 - Anki `{sentence-audio}` has its own mining context field and selected-format media
-  preparation. Associated audiobooks require an existing cue; otherwise TTS synthesizes
+  preparation. Associated audiobooks require an existing cue; otherwise enabled TTS synthesizes
   the full source sentence. Missing audiobook cues never trigger TTS. Existing
   `{sasayaki-audio}` remains audiobook-only. Shared audiobook paths upload once, and
   a failed requested sentence upload prevents silently creating a card without audio.

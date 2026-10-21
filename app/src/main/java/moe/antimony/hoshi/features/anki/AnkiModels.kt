@@ -317,6 +317,7 @@ data class AnkiMiningContext(
     val coverPath: String? = null,
     val sasayakiAudioPath: String? = null,
     val sentenceAudioPath: String? = null,
+    val sentenceAudioSuppressed: Boolean = false,
     val sentenceOffset: Int? = null,
 )
 

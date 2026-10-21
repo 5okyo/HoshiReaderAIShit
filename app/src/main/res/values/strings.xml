@@ -939,6 +939,7 @@
     <string name="tts_rate_label">Engine speech rate</string>
     <string name="tts_playback_rate">Hoshi playback speed</string>
     <string name="tts_rate_value">%1$.2f×</string>
+    <string name="tts_enabled">Enable TTS</string>
     <string name="tts_title">TTS</string>
     <string name="tts_dictionary">Text replacements</string>
     <string name="tts_add_word">Add replacement</string>

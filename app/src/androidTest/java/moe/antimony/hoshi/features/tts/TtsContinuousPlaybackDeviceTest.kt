@@ -35,7 +35,7 @@ class TtsContinuousPlaybackDeviceTest {
             OnlineTtsEngine(OnlineTtsTransport(), TtsCredentialCipher(Dispatchers.IO), Dispatchers.IO), CustomTtsEngine(OnlineTtsTransport(), { _, _ -> throw TtsException(TtsFailure.Configuration) }, kotlinx.coroutines.Dispatchers.IO))
         val audio = TtsAudioRepository(router, directory, Dispatchers.IO, AndroidTtsExportFallback(context))
         val repository = TtsRepository(MemoryStore())
-        repository.settings { TtsSettings(engine = TtsOnlineSource.Edge.id,
+        repository.settings { TtsSettings(enabled = true, engine = TtsOnlineSource.Edge.id,
             prefetchSentences = prefetchSentences).withVoice("ja-JP-NanamiNeural").withRate(2f) }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         try {

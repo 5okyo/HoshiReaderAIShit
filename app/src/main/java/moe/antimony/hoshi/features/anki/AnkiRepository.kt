@@ -250,7 +250,7 @@ internal class AnkiRepository(
             ?: return@withContext false
         val needsCover = fieldMappings.referencesAnkiHandlebar("{book-cover}")
         val needsSasayakiAudio = fieldMappings.referencesAnkiHandlebar("{sasayaki-audio}")
-        val needsSentenceAudio = fieldMappings.referencesAnkiHandlebar("{sentence-audio}")
+        val needsSentenceAudio = !context.sentenceAudioSuppressed && fieldMappings.referencesAnkiHandlebar("{sentence-audio}")
         val uploadedAudio = mutableMapOf<String, Result<String?>>()
         fun uploadSentence(path: String, required: Boolean): String? {
             val uploaded = uploadedAudio.getOrPut(path) {

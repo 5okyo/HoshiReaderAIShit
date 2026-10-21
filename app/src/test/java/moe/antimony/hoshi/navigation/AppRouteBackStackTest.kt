@@ -5,6 +5,16 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class AppRouteBackStackTest {
+    @Test fun ttsSectionsRestoreAndPopBackToTtsHome() {
+        listOf(AppRoute.TtsVoiceSettingsRoute, AppRoute.TtsReplacementsSettingsRoute, AppRoute.TtsReadingSettingsRoute).forEach { route ->
+            val serialized = kotlinx.serialization.json.Json.encodeToString(AppRoute.serializer(), route)
+            assertEquals(route, kotlinx.serialization.json.Json.decodeFromString(AppRoute.serializer(), serialized))
+            val stack = mutableListOf<NavKey>(AppRoute.SettingsRoute, AppRoute.TtsSettingsRoute, route)
+            stack.popAppRoute(onReaderRouteRemoved = { error("TTS settings must not remove a reader") })
+            assertEquals(listOf(AppRoute.SettingsRoute, AppRoute.TtsSettingsRoute), stack)
+        }
+    }
+
     @Test
     fun statisticsDetailsPopBackToTheirExistingDashboardEntry() {
         listOf(AppRoute.StatisticsSettingsRoute, AppRoute.StatisticsBookRoute("folder")).forEach { route ->

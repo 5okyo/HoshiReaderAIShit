@@ -936,6 +936,7 @@
     <string name="tts_rate_label">引擎语速</string>
     <string name="tts_playback_rate">Hoshi 播放速度</string>
     <string name="tts_rate_value">%1$.2f×</string>
+    <string name="tts_enabled">启用 TTS</string>
     <string name="tts_title">TTS</string>
     <string name="tts_dictionary">文本替换规则</string>
     <string name="tts_add_word">添加替换</string>

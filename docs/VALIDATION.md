@@ -1516,6 +1516,27 @@ Validate relevant sync/update/Sasayaki changes with:
 
 ## Japanese TTS
 
+- TTS defaults off, including existing preferences without an enabled field. Verify its
+  settings home shows only the master switch until enabled, then Voice/Replacements/Settings
+  entries navigate to independent pages and Back returns home. Restore a child route after
+  recreation; no child or reader panel may expose the master switch. Home and non-Voice
+  pages must not refresh voice catalogs. Delayed reads must not show default controls;
+  failed reads/writes must preserve original diagnostics and recover through retry.
+- Disable during playback, preparation, prefetch and lookup auto-pause. Reader menu,
+  popup TTS bar, top/bottom playback controls and native-selection TTS Replace disappear;
+  pending audio and old notification/lookup callbacks cannot restart speech. Re-enabling
+  preserves configuration without automatic playback. Sasayaki and dictionary audio
+  remain independently available. Exercise paginated, continuous and VN modes.
+- With TTS disabled and no audiobook, a card containing `{sentence-audio}` still mines
+  with an empty replacement and no TTS synthesis/upload. Associated audiobook audio
+  still exports; genuine required-audio errors still fail with diagnostics.
+- JVM regressions live in `TtsRepositoryTest`, `TtsPlaybackControllerTest`,
+  `TtsViewModelConfigurationTest`, `AnkiRepositoryBackendSelectionTest` and
+  `AppRouteBackStackTest`. Run `TtsPanelStateTest` and
+  `ReaderSelectionViewportWebViewTest#globalTtsSwitchUpdatesNativeSelectionMenuWithoutRemovingHighlight`
+  using the data-preserving explicit instrumentation procedure for settings/navigation
+  and native-menu coverage. Playback/UI fixtures must explicitly enable their isolated TTS store.
+
 - `TtsRepositoryTest` verifies active/inactive voices, source rates, dialogue
   choices, credentials and WAV/MP3 selection through edit/reload. Deferred independent
   setting edits must preserve newer credentials and behavior settings. Switching sources

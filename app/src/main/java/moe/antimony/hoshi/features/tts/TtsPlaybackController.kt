@@ -31,6 +31,7 @@ data class TtsPlaybackState(
 }
 
 @OptIn(UnstableApi::class)
+@kotlin.OptIn(ExperimentalCoroutinesApi::class)
 @Singleton
 class TtsPlaybackController internal constructor(
     private val books: TtsBookRepository,
@@ -56,6 +57,7 @@ class TtsPlaybackController internal constructor(
     private var prefetch: Job? = null
     private var preparedIndex: Int? = null
     private var preferences = TtsPreferences()
+    fun retryPreferences() { repository.retryPreferences() }
     private var associated = false
     private var stopAfterSentence = false
     var imageHoldMillis: Long = 1_000
@@ -75,11 +77,14 @@ class TtsPlaybackController internal constructor(
         output.onPaused = { if (state.value.playing && !state.value.preparing) pause() }
         output.onError = { fail(it.toTtsError(TtsFailure.AudioUnavailable)) }
         scope.launch(Dispatchers.Main.immediate) {
-            repository.preferences.catch { fail(it.toTtsError(TtsFailure.Storage)) }.collect { next ->
+            repository.preferencesReloads.flatMapLatest {
+                repository.preferences.catch { preferences = TtsPreferences(); stop(); fail(it.toTtsError(TtsFailure.Storage)) }
+            }.collect { next ->
                 val prefetchChanged = next.settings.prefetchSentences != preferences.settings.prefetchSentences
                 val settingsChanged = next.settings.synthesisSettings() != preferences.settings.synthesisSettings()
                 val wordsChanged = next.words != preferences.words
                 preferences = next
+                if (!next.settings.enabled) { stop(); return@collect }
                 output.setPlaybackRate(next.settings.playbackRate)
                 if (settingsChanged || wordsChanged || prefetchChanged) { prefetch?.cancel(); prefetch = null }
                 val restartPending = wordsChanged && state.value.playing && state.value.preparing && !settingsChanged
@@ -118,7 +123,7 @@ class TtsPlaybackController internal constructor(
         resolve: suspend () -> TtsBookPosition?, startPlayback: Boolean,
         singleSentence: Boolean = false, natural: Boolean = false,
     ) {
-        if (associated || book == null) return
+        if (!preferences.settings.enabled || associated || book == null) return
         pause()
         if (!natural) { prefetch?.cancel(); prefetch = null }
         preparedIndex = null
@@ -183,7 +188,7 @@ class TtsPlaybackController internal constructor(
         }
     }
     private fun seek(index: Int, singleSentence: Boolean = false, natural: Boolean = false, startPlayback: Boolean = state.value.playing) {
-        if (index !in state.value.sentences.indices || associated) return
+        if (!preferences.settings.enabled || index !in state.value.sentences.indices || associated) return
         pause()
         if (!natural) { prefetch?.cancel(); prefetch = null }
         sentenceFinished = false
@@ -206,7 +211,7 @@ class TtsPlaybackController internal constructor(
         }
     }
     fun play() {
-        if (associated || book == null || state.value.playing) return
+        if (!preferences.settings.enabled || associated || book == null || state.value.playing) return
         if (position == null && pendingPosition == null) {
             val source = requireNotNull(book)
             pendingPosition = { books.at(source, 0, 0) }

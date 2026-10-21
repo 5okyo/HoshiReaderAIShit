@@ -1080,6 +1080,24 @@ class AnkiRepositoryBackendSelectionTest {
         assertTrue(ankiConnect.lastFields.getValue("Media").contains(".opus"))
     }
 
+    @Test fun explicitlySuppressedSentenceAudioMinesEmptyButMissingRequiredAudioStillFails() = runBlocking {
+        val deck = AnkiDeck(10L, "Mining")
+        val type = AnkiNoteType(20L, "Basic", listOf("Media"))
+        val backend = RecordingBackend(decks = listOf(deck), noteTypes = listOf(type))
+        val repository = repository(
+            settingsRepository = InMemoryAnkiSettingsRepository(AnkiSettings(
+                backendKind = AnkiBackendKind.AnkiConnect, ankiConnectUrl = "https://anki.example.com",
+                selectedDeckId = deck.id, selectedNoteTypeId = type.id,
+                fieldMappings = mapOf("Media" to "{sentence-audio}|{sentence}"),
+            )), ankiConnectBackendFactory = { _, _ -> backend },
+        )
+        val context = AnkiMiningContext(sentence = "猫です。", sentenceAudioSuppressed = true)
+        assertTrue(repository.mineEntry("""{"expression":"猫"}""", context, emptyList(), emptyList()))
+        assertEquals(mapOf("Media" to "|猫です。"), backend.lastFields)
+        assertEquals(0, backend.addMediaFromBytesCalls)
+        assertFalse(repository.mineEntry("""{"expression":"猫"}""", context.copy(sentenceAudioSuppressed = false), emptyList(), emptyList()))
+    }
+
     private fun repository(
         backend: AnkiBackend = RecordingBackend(),
         settingsRepository: InMemoryAnkiSettingsRepository = InMemoryAnkiSettingsRepository(),

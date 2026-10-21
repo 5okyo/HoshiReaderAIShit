@@ -362,7 +362,15 @@ fun AppShell(
                     onDuplicated = ::returnFromDuplicatedAnkiFormat,
                     modifier = Modifier.fillMaxSize(),
                 )
-                AppRoute.TtsSettingsRoute -> moe.antimony.hoshi.features.tts.TtsSettingsView(onClose = ::popRoute)
+                AppRoute.TtsSettingsRoute -> moe.antimony.hoshi.features.tts.TtsSettingsView(onClose = ::popRoute,
+                    onOpenSection = { section -> settingsBackStack.add(when (section) {
+                        moe.antimony.hoshi.features.tts.TtsSettingsSection.Voice -> AppRoute.TtsVoiceSettingsRoute
+                        moe.antimony.hoshi.features.tts.TtsSettingsSection.Replacements -> AppRoute.TtsReplacementsSettingsRoute
+                        moe.antimony.hoshi.features.tts.TtsSettingsSection.Reading -> AppRoute.TtsReadingSettingsRoute
+                    }) })
+                AppRoute.TtsVoiceSettingsRoute -> moe.antimony.hoshi.features.tts.TtsSettingsSectionView(moe.antimony.hoshi.features.tts.TtsSettingsSection.Voice, ::popRoute)
+                AppRoute.TtsReplacementsSettingsRoute -> moe.antimony.hoshi.features.tts.TtsSettingsSectionView(moe.antimony.hoshi.features.tts.TtsSettingsSection.Replacements, ::popRoute)
+                AppRoute.TtsReadingSettingsRoute -> moe.antimony.hoshi.features.tts.TtsSettingsSectionView(moe.antimony.hoshi.features.tts.TtsSettingsSection.Reading, ::popRoute)
                 AppRoute.AnkiAdvancedRoute -> AnkiAdvancedView(
                     onClose = ::popRoute,
                     modifier = Modifier.fillMaxSize(),
@@ -629,7 +637,7 @@ private fun AppRoute.toMainTab(): MainTab = when (this) {
     AppRoute.SettingsRoute -> MainTab.Settings
     is AppRoute.ReaderRoute -> MainTab.Books
     is AppRoute.SettingsDetailRoute, is AppRoute.DiagnosticsRecordsRoute -> MainTab.Settings
-    is AppRoute.AnkiCardFormatRoute, AppRoute.AnkiAdvancedRoute, AppRoute.TtsSettingsRoute -> MainTab.Settings
+    is AppRoute.AnkiCardFormatRoute, AppRoute.AnkiAdvancedRoute, AppRoute.TtsSettingsRoute, AppRoute.TtsVoiceSettingsRoute, AppRoute.TtsReplacementsSettingsRoute, AppRoute.TtsReadingSettingsRoute -> MainTab.Settings
 }
 
 private fun SettingsDestination.toSection(): SettingsDetailSection = when (this) {

@@ -21,6 +21,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -34,6 +35,35 @@ import moe.antimony.hoshi.R
 class ReaderSelectionViewportWebViewTest {
     @get:Rule val composeRule = createComposeRule()
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
+
+    @Test fun globalTtsSwitchUpdatesNativeSelectionMenuWithoutRemovingHighlight() {
+        val webView = createWebView()
+        var mode: android.view.ActionMode? = null
+        try {
+            instrumentation.runOnMainSync {
+                webView.ttsEnabled = false
+                mode = webView.startActionMode(object : android.view.ActionMode.Callback {
+                    override fun onCreateActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = true
+                    override fun onPrepareActionMode(mode: android.view.ActionMode, menu: android.view.Menu) = true
+                    override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem) = false
+                    override fun onDestroyActionMode(mode: android.view.ActionMode) = Unit
+                }, android.view.ActionMode.TYPE_FLOATING)
+                assertNotNull(mode)
+                assertNull(mode!!.menu.findItem(0x484920))
+                assertNotNull(mode!!.menu.findItem(ReaderHighlightSelectionMenu.parentItemId))
+                webView.ttsEnabled = true
+                mode!!.invalidate()
+                assertNotNull(mode!!.menu.findItem(0x484920))
+                webView.ttsEnabled = false
+                mode!!.invalidate()
+                assertNull(mode!!.menu.findItem(0x484920))
+                assertNotNull(mode!!.menu.findItem(ReaderHighlightSelectionMenu.parentItemId))
+            }
+        } finally {
+            instrumentation.runOnMainSync { mode?.finish() }
+            destroyFixture(webView)
+        }
+    }
 
     @Test
     fun draggingRubyHandleKeepsSelectionWithinDraggedText() {
@@ -661,7 +691,7 @@ class ReaderSelectionViewportWebViewTest {
         lateinit var webView: HoshiReaderWebView
         composeRule.setContent {
             AndroidView(modifier = Modifier.fillMaxSize(), factory = { context ->
-                HoshiReaderWebView(context).also { webView = it; it.settings.javaScriptEnabled = true }
+                HoshiReaderWebView(context).also { webView = it; it.settings.javaScriptEnabled = true; it.ttsEnabled = true }
             })
         }
         composeRule.waitForIdle()

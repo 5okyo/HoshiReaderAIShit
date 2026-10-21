@@ -205,10 +205,12 @@ fun ReaderWebView(
     val ttsViewModel: TtsViewModel = hiltViewModel()
     val ttsLifetime: ReaderTtsLifetime = hiltViewModel()
     val ttsState by ttsViewModel.playback.state.collectAsStateWithLifecycle()
+    val ttsPreferences by ttsViewModel.preferences.collectAsStateWithLifecycle()
+    val ttsEnabled = ttsPreferences?.settings?.enabled == true
     val ttsBookId = bookRoot?.name ?: book.title
     ttsLifetime.bookId = ttsBookId
     val ttsAssociated = (sasayakiPlayer?.playback ?: sasayakiPlaybackData).hasStoredAudioSource() || sasayakiPlayer?.hasAudio == true
-    val ttsAvailable = isSasayakiPlaybackLoaded && !ttsAssociated
+    val ttsAvailable = ttsEnabled && isSasayakiPlaybackLoaded && !ttsAssociated
     val hasStartedTtsSession = ttsAvailable && ttsState.bookId == ttsBookId && ttsState.started
     var showTts by remember(bookRoot) { mutableStateOf(false) }
     var ttsSelection by remember(bookRoot) { mutableStateOf<ReaderSelectionData?>(null) }
@@ -256,9 +258,13 @@ fun ReaderWebView(
         )
     }
     val ttsLookupPause = stateHolder.ttsLookupPause
-    LaunchedEffect(book, ttsBookId, isSasayakiPlaybackLoaded, ttsAssociated) {
-        if (isSasayakiPlaybackLoaded) ttsViewModel.playback.load(ttsBookId, book, ttsAssociated)
-        if (ttsAssociated) { showTts = false; ttsLookupPause.clear() }
+    LaunchedEffect(book, ttsBookId, isSasayakiPlaybackLoaded, ttsAssociated, ttsEnabled) {
+        if (ttsEnabled && isSasayakiPlaybackLoaded) ttsViewModel.playback.load(ttsBookId, book, ttsAssociated)
+        if (!ttsEnabled || ttsAssociated) {
+            showTts = false
+            ttsSelection = null
+            ttsLookupPause.clear()
+        }
     }
     LaunchedEffect(readerSettings) {
         stateHolder.syncSettings(readerSettings)
@@ -907,13 +913,15 @@ fun ReaderWebView(
                         val sentenceAudio = if (needsSentence) {
                             if (linkedAudio) audiobook ?: throw TtsException(TtsFailure.AudioUnavailable)
                             else {
-                                val sourceSentence = ttsViewModel.sourceSentence(book, selectionChapter, popup.state.selection)
-                                ttsViewModel.sentenceAudio(sourceSentence, ttsBookId).also { generated = it }
+                                ttsViewModel.sentenceAudio(ttsBookId) {
+                                    ttsViewModel.sourceSentence(book, selectionChapter, popup.state.selection)
+                                }.also { generated = it }
                             }
                         } else null
                         val ankiContext = popup.state.ankiContext.copy(
                             sasayakiAudioPath = if (needsSasayaki) audiobook?.absolutePath else null,
                             sentenceAudioPath = sentenceAudio?.absolutePath,
+                            sentenceAudioSuppressed = needsSentence && !linkedAudio && sentenceAudio == null,
                         )
                         val mined = ankiViewModel.minePreparedEntry(message.formatId, message.payloadJson, ankiContext,
                             onWarning = { ankiSynchronizationWarning = it })
@@ -1575,6 +1583,9 @@ fun ReaderWebView(
     }
     LaunchedEffect(ttsAvailable, ttsState.started, ttsState.playing, webView, stateHolder.isWebViewRestoring) {
         if (ttsAvailable && ttsState.started && !stateHolder.isWebViewRestoring) ttsState.sentence?.let { currentTtsPresenter.value(it, false, true) }
+        else if (!ttsAssociated && !stateHolder.isWebViewRestoring) {
+            webView?.evaluateJavascript(ReaderPaginationScripts.clearSasayakiCueInvocation(), null)
+        }
     }
     LaunchedEffect(bookRoot, isSasayakiMatchLoaded, isSasayakiPlaybackLoaded, sasayakiPlaybackData) {
         cancelSasayakiAutoPage()
@@ -1881,6 +1892,7 @@ fun ReaderWebView(
         }
     }
     fun ttsAtReadingPosition(startPlayback: Boolean) {
+        if (!ttsAvailable) return
         val position = readerPosition.displayedPosition
         val count = book.bookInfo.chapterInfo[book.chapters[position.index].href]?.chapterCount ?: 0
         val offset = (position.progress * count).toInt()
@@ -2104,7 +2116,8 @@ fun ReaderWebView(
                             onReaderInteraction = ::handleReaderInteraction,
                             onImageTapped = ::openFullscreenImage,
                             onHighlightChanged = ::changeHighlight,
-                            onTtsReplacementSelected = { selection -> ttsSelection = selection },
+                            ttsEnabled = ttsEnabled,
+                            onTtsReplacementSelected = { selection -> if (ttsEnabled) ttsSelection = selection },
                             readerPopupBridgeHolder = readerPopupBridgeHolder,
                             readerPopupResourceHandler = readerPopupResourceHandler,
                             readerPopupFrames = readerLookupPopupPayloads,
@@ -2288,7 +2301,7 @@ fun ReaderWebView(
         if (showTts && ttsAvailable) {
             TtsSheet(ttsViewModel, ttsBookId, onStart = { ttsAtReadingPosition(true) }, onDismiss = { showTts = false })
         }
-        ttsSelection?.let { selection ->
+        ttsSelection?.takeIf { ttsEnabled }?.let { selection ->
             val draft = remember(selection) {
                 TtsWord(java.util.UUID.randomUUID().toString(), selection.text.lineSequence().joinToString(""), "")
             }
