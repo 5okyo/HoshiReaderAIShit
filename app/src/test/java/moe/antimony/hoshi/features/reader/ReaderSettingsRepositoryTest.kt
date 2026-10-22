@@ -330,6 +330,7 @@ class ReaderSettingsRepositoryTest {
             assertTrue(settings.showProgress)
             assertFalse(settings.showChapterProgress)
             assertTrue(settings.showCharacters)
+            assertFalse(settings.showPages)
             assertTrue(settings.showPercentage)
             assertTrue(settings.alwaysShowProgress)
             assertTrue(settings.showProgressTop)
@@ -538,6 +539,7 @@ class ReaderSettingsRepositoryTest {
                     showProgress = false,
                     showChapterProgress = true,
                     showCharacters = false,
+                    showPages = true,
                     showPercentage = false,
                     alwaysShowProgress = false,
                     showProgressTop = false,
@@ -605,6 +607,7 @@ class ReaderSettingsRepositoryTest {
             assertFalse(saved.showProgress)
             assertTrue(saved.showChapterProgress)
             assertFalse(saved.showCharacters)
+            assertTrue(saved.showPages)
             assertFalse(saved.showPercentage)
             assertFalse(saved.alwaysShowProgress)
             assertFalse(saved.showProgressTop)

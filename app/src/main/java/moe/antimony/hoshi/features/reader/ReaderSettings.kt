@@ -128,6 +128,7 @@ data class ReaderSettings(
     val showProgress: Boolean = true,
     val showChapterProgress: Boolean = false,
     val showCharacters: Boolean = true,
+    val showPages: Boolean = false,
     val showPercentage: Boolean = true,
     val alwaysShowProgress: Boolean = true,
     val showProgressTop: Boolean = true,
@@ -484,6 +485,7 @@ class ReaderSettingsStore(context: Context) : ReaderSettingsLegacySource {
         showProgress = preferences.getBoolean("readerShowProgress", true),
         showChapterProgress = preferences.getBoolean("readerShowChapterProgress", false),
         showCharacters = preferences.getBoolean("readerShowCharacters", true),
+        showPages = preferences.getBoolean("readerShowPages", false),
         showPercentage = preferences.getBoolean("readerShowPercentage", true),
         alwaysShowProgress = preferences.getBoolean("readerAlwaysShowProgress", true),
         showProgressTop = preferences.getBoolean("readerShowProgressTop", true),
@@ -559,6 +561,7 @@ class ReaderSettingsStore(context: Context) : ReaderSettingsLegacySource {
             .putBoolean("readerShowProgress", settings.showProgress)
             .putBoolean("readerShowChapterProgress", settings.showChapterProgress)
             .putBoolean("readerShowCharacters", settings.showCharacters)
+            .putBoolean("readerShowPages", settings.showPages)
             .putBoolean("readerShowPercentage", settings.showPercentage)
             .putBoolean("readerAlwaysShowProgress", settings.alwaysShowProgress)
             .putBoolean("readerShowProgressTop", settings.showProgressTop)
@@ -759,6 +762,7 @@ class ReaderSettingsRepository(
             showProgress = this[KEY_SHOW_PROGRESS] ?: true,
             showChapterProgress = this[KEY_SHOW_CHAPTER_PROGRESS] ?: false,
             showCharacters = this[KEY_SHOW_CHARACTERS] ?: true,
+            showPages = this[KEY_SHOW_PAGES] ?: false,
             showPercentage = this[KEY_SHOW_PERCENTAGE] ?: true,
             alwaysShowProgress = this[KEY_ALWAYS_SHOW_PROGRESS] ?: true,
             showProgressTop = this[KEY_SHOW_PROGRESS_TOP] ?: true,
@@ -835,6 +839,7 @@ class ReaderSettingsRepository(
         this[KEY_SHOW_PROGRESS] = settings.showProgress
         this[KEY_SHOW_CHAPTER_PROGRESS] = settings.showChapterProgress
         this[KEY_SHOW_CHARACTERS] = settings.showCharacters
+        this[KEY_SHOW_PAGES] = settings.showPages
         this[KEY_SHOW_PERCENTAGE] = settings.showPercentage
         this[KEY_ALWAYS_SHOW_PROGRESS] = settings.alwaysShowProgress
         this[KEY_SHOW_PROGRESS_TOP] = settings.showProgressTop
@@ -971,6 +976,7 @@ class ReaderSettingsRepository(
         private val KEY_SHOW_PROGRESS = booleanPreferencesKey("readerShowProgress")
         private val KEY_SHOW_CHAPTER_PROGRESS = booleanPreferencesKey("readerShowChapterProgress")
         private val KEY_SHOW_CHARACTERS = booleanPreferencesKey("readerShowCharacters")
+        private val KEY_SHOW_PAGES = booleanPreferencesKey("readerShowPages")
         private val KEY_SHOW_PERCENTAGE = booleanPreferencesKey("readerShowPercentage")
         private val KEY_ALWAYS_SHOW_PROGRESS = booleanPreferencesKey("readerAlwaysShowProgress")
         private val KEY_SHOW_PROGRESS_TOP = booleanPreferencesKey("readerShowProgressTop")
@@ -1145,6 +1151,7 @@ private data class ProfileReaderAppearanceSettings(
     val showProgress: Boolean = true,
     val showChapterProgress: Boolean = false,
     val showCharacters: Boolean = true,
+    val showPages: Boolean = false,
     val showPercentage: Boolean = true,
     val alwaysShowProgress: Boolean = true,
     val showProgressTop: Boolean = true,
@@ -1207,6 +1214,7 @@ private fun ReaderSettings.toProfileAppearanceSettings(): ProfileReaderAppearanc
         showProgress = showProgress,
         showChapterProgress = showChapterProgress,
         showCharacters = showCharacters,
+        showPages = showPages,
         showPercentage = showPercentage,
         alwaysShowProgress = alwaysShowProgress,
         showProgressTop = showProgressTop,
@@ -1271,6 +1279,7 @@ private fun ReaderSettings.withProfileAppearance(appearance: ProfileReaderAppear
         showProgress = appearance.showProgress,
         showChapterProgress = appearance.showChapterProgress,
         showCharacters = appearance.showCharacters,
+        showPages = appearance.showPages,
         showPercentage = appearance.showPercentage,
         alwaysShowProgress = appearance.alwaysShowProgress,
         showProgressTop = appearance.showProgressTop,

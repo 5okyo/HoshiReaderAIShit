@@ -39,6 +39,31 @@ data class ReaderProgressDisplay(
     fun countText(rawCount: Int): String =
         formatDisplayNumber(displayCount(rawCount))
 
+    /** Raw characters in one virtual page: 500 characters, or 250 words for word-counted languages. */
+    private val rawCharactersPerPage: Int
+        get() = when (unit) {
+            ReaderProgressDisplayUnit.Characters -> CharactersPerVirtualPage
+            ReaderProgressDisplayUnit.Words -> WordsPerVirtualPage * CharactersPerDisplayedWord
+        }
+
+    /** One-based virtual page containing [rawCount], capped at the last page once [totalRawCount] is known. */
+    fun pageNumber(rawCount: Int, totalRawCount: Int = 0): Int {
+        val page = max(rawCount, 0) / rawCharactersPerPage + 1
+        return if (totalRawCount > 0) page.coerceAtMost(totalPages(totalRawCount)) else page
+    }
+
+    fun totalPages(totalRawCount: Int): Int =
+        max(1, ceil(max(totalRawCount, 0).toDouble() / rawCharactersPerPage).toInt())
+
+    fun pageText(currentRawCount: Int, totalRawCount: Int): String {
+        val page = formatDisplayNumber(pageNumber(currentRawCount, totalRawCount))
+        return if (totalRawCount > 0) {
+            "p.$page / ${formatDisplayNumber(totalPages(totalRawCount))}"
+        } else {
+            "p.$page"
+        }
+    }
+
     fun countWithPercentText(rawCount: Int, totalRawCount: Int): String =
         "${countText(rawCount)} (${rawProgressPercentText(rawCount, totalRawCount)})"
 
@@ -66,6 +91,8 @@ data class ReaderProgressDisplay(
 
     companion object {
         private const val CharactersPerDisplayedWord = 5
+        private const val CharactersPerVirtualPage = 500
+        private const val WordsPerVirtualPage = 250
         private val CharacterDisplay = ReaderProgressDisplay(ReaderProgressDisplayUnit.Characters)
 
         fun characters(): ReaderProgressDisplay = CharacterDisplay

@@ -438,6 +438,7 @@
     <string name="reader_appearance_show_chapter_progress">显示章节进度</string>
     <string name="reader_appearance_show_character_count">显示字符数</string>
     <string name="reader_appearance_show_word_count">显示单词数</string>
+    <string name="reader_appearance_show_page_count">显示页数</string>
     <string name="reader_appearance_show_percentage">显示百分比</string>
     <string name="reader_appearance_always_show_progress">始终显示进度</string>
     <string name="reader_appearance_show_back_button">显示返回按钮</string>

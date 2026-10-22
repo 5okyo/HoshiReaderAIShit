@@ -184,6 +184,77 @@ class ReaderChromeTest {
     }
 
     @Test
+    fun pageCountIsHiddenByDefaultAndShownBetweenCharactersAndPercentage() {
+        val state = ReaderChromeState(
+            title = "屍人荘の殺人",
+            currentCharacter = 355,
+            totalCharacters = 169325,
+        )
+
+        assertFalse(ReaderSettings().showPages)
+        assertEquals("355 / 169325 0.21%", state.progressText(ReaderSettings()))
+        assertEquals(
+            "355 / 169325 p.1 / 339 0.21%",
+            state.progressText(ReaderSettings(showPages = true)),
+        )
+        assertEquals(
+            "p.1 / 339",
+            state.progressText(ReaderSettings(showCharacters = false, showPercentage = false, showPages = true)),
+        )
+    }
+
+    @Test
+    fun virtualPagesAdvanceEvery500CharactersAndStayWithinTheBook() {
+        val display = ReaderProgressDisplay.characters()
+
+        assertEquals(1, display.pageNumber(0, 1_200))
+        assertEquals(1, display.pageNumber(499, 1_200))
+        assertEquals(2, display.pageNumber(500, 1_200))
+        assertEquals(3, display.pageNumber(1_000, 1_200))
+        assertEquals(3, display.totalPages(1_200))
+        assertEquals(3, display.pageNumber(1_200, 1_200))
+        assertEquals(1, display.totalPages(0))
+        // A position exactly on the final boundary must not report a page past the end.
+        assertEquals(2, display.totalPages(1_000))
+        assertEquals(2, display.pageNumber(1_000, 1_000))
+        assertEquals("p.3 / 3", display.pageText(1_200, 1_200))
+    }
+
+    @Test
+    fun pageTextOmitsTheTotalWhileItIsUnknown() {
+        assertEquals("p.1", ReaderProgressDisplay.characters().pageText(355, 0))
+        assertEquals("p.2", ReaderProgressDisplay.characters().pageText(600, 0))
+    }
+
+    @Test
+    fun englishProfilePagesHold250WordsAndUseThousandsSeparators() {
+        val display = ReaderProgressDisplay.word()
+
+        assertEquals(1, display.pageNumber(1_249, 169_325))
+        assertEquals(2, display.pageNumber(1_250, 169_325))
+        assertEquals(136, display.totalPages(169_325))
+        assertEquals("p.1 / 136", display.pageText(355, 169_325))
+        assertEquals("p.1 / 1,200", display.pageText(0, 1_500_000))
+        assertEquals("p.1 / 1,201", display.pageText(0, 1_501_000))
+    }
+
+    @Test
+    fun chapterProgressUsesChapterRelativePages() {
+        val state = ReaderChromeState(
+            title = "Book",
+            currentCharacter = 2_000,
+            totalCharacters = 10_000,
+            chapterCurrentCharacter = 600,
+            chapterTotalCharacters = 2_000,
+        )
+
+        assertEquals(
+            "2000 / 10000 p.5 / 20 20.00% (600 / 2000 p.2 / 4 30.00%)",
+            state.progressText(ReaderSettings(showPages = true, showChapterProgress = true)),
+        )
+    }
+
+    @Test
     fun formatsBookAndTrueChapterProgressLikeIos() {
         val state = ReaderChromeState(
             title = "Book",

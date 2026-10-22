@@ -63,6 +63,9 @@ data class ReaderChromeState(
                 parts[parts.lastIndex] = progressDisplay.rangeText(current, total)
             }
         }
+        if (settings.showPages) {
+            parts += progressDisplay.pageText(current, total)
+        }
         if (settings.showPercentage) {
             val percent = if (total > 0) {
                 current.toDouble() / total.toDouble() * 100.0

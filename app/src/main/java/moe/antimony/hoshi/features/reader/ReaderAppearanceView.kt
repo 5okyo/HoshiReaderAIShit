@@ -692,6 +692,14 @@ private fun ReaderAppearanceContent(
                         )
                         AppearanceDivider(palette)
                         SwitchRow(
+                            label = stringResource(R.string.reader_appearance_show_page_count),
+                            checked = settings.showPages,
+                            onCheckedChange = { checked ->
+                                onSettingsChange { current -> current.copy(showPages = checked) }
+                            },
+                        )
+                        AppearanceDivider(palette)
+                        SwitchRow(
                             label = stringResource(R.string.reader_appearance_show_percentage),
                             checked = settings.showPercentage,
                             onCheckedChange = { checked ->

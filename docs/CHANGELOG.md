@@ -16,6 +16,7 @@ Release notes before v1.3.0 are in [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md).
 - View, copy or export recent runtime errors alongside crash history and build information in Diagnostics.
 - Install the latest development preview from About.
 - Add LINE Seed JP to the recommended reader fonts.
+- Optionally show a page count (for example `p.42 / 310`, based on 500 characters or 250 words per page) beside the character count and percentage in the reader's progress display, for both the book and the chapter.
 
 ### Changed
 
