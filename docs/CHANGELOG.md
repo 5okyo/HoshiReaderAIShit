@@ -25,6 +25,7 @@ Release notes before v1.3.0 are in [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md).
 
 ### Fixed
 
+- Start reading statistics reliably when Sasayaki turns pages automatically, including after statistics finish loading or autostart settings change, without treating subpixel adjustments on the same page as page turns.
 - Restore continuous reading without clipped text, furigana or position drift, and keep full-width lookup popups independent of reader padding.
 - Keep the selection menu and handles usable after dragging across paragraphs or ruby, without unexpected page turns or selection flicker.
 - Create, recolor and remove highlights when selections touch ruby annotations.

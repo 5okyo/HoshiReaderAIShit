@@ -1587,6 +1587,16 @@ fun ReaderWebView(
             webView?.evaluateJavascript(ReaderPaginationScripts.clearSasayakiCueInvocation(), null)
         }
     }
+    val sasayakiCallbacks = rememberReaderSasayakiCallbacks(
+        onCue = ::dispatchSasayakiCueToReader,
+        onClearCue = {
+            cancelSasayakiAutoPage()
+            lastSasayakiCue = null
+            pendingSasayakiCue = null
+            pendingSasayakiRestoreCue = null
+            webView?.evaluateJavascript(ReaderPaginationScripts.clearSasayakiCueInvocation(), null)
+        },
+    )
     LaunchedEffect(bookRoot, isSasayakiMatchLoaded, isSasayakiPlaybackLoaded, sasayakiPlaybackData) {
         cancelSasayakiAutoPage()
         sasayakiPlayer?.release()
@@ -1600,16 +1610,8 @@ fun ReaderWebView(
                 matchData = sasayakiMatchData,
                 initialPlayback = sasayakiPlaybackData,
                 getCurrentChapterIndex = { stateHolder.readerPosition.displayedPosition.index },
-                onCue = { cue, reveal, source ->
-                    dispatchSasayakiCueToReader(cue, reveal, source)
-                },
-                onClearCue = {
-                    cancelSasayakiAutoPage()
-                    lastSasayakiCue = null
-                    pendingSasayakiCue = null
-                    pendingSasayakiRestoreCue = null
-                    webView?.evaluateJavascript(ReaderPaginationScripts.clearSasayakiCueInvocation(), null)
-                },
+                onCue = sasayakiCallbacks.onCue,
+                onClearCue = sasayakiCallbacks.onClearCue,
                 playbackServiceRuntime = sasayakiPlaybackServiceRuntime,
             )
         } else {

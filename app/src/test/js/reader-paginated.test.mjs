@@ -1260,6 +1260,43 @@ test('e-ink Sasayaki chapter load keeps geometry available for id-only highlight
     }
 });
 
+test('paginated Sasayaki ignores subpixel rounding on the current page but reports a real page turn', () => {
+    for (const vertical of [true, false]) for (const rounding of [-0.18, 0.18]) {
+        const body = new TestElement('body');
+        body.scrollHeight = body.scrollWidth = 20_000;
+        body.scrollTop = body.scrollLeft = 6_312 + rounding;
+        const target = new TestElement('span');
+        target.rect = testRect(100, 120, 100, 120);
+        body.appendChild(target);
+        const { reader } = loadReader(body, readerPaginatedUrl, {
+            writingMode: vertical ? 'vertical-rl' : 'horizontal-tb',
+        });
+        reader.pageHeight = reader.pageWidth = 789;
+
+        assert.equal(reader.scrollToRange(target), false);
+        assert.equal(reader.getPagePosition(reader.getScrollContext()), 6_312 + rounding);
+
+        target.rect = testRect(900, 920, 900, 920);
+        assert.equal(reader.scrollToRange(target), true);
+        assert.equal(reader.getPagePosition(reader.getScrollContext()), 7_101);
+    }
+});
+
+test('paginated Sasayaki does not report a page turn when the target clamps to the current last page', () => {
+    const body = new TestElement('body');
+    body.scrollHeight = 7_189;
+    body.scrollWidth = 480;
+    body.scrollTop = 6_400;
+    const target = new TestElement('span');
+    target.rect = testRect(900, 920);
+    body.appendChild(target);
+    const { reader } = loadReader(body, readerPaginatedUrl);
+    reader.pageHeight = 789;
+
+    assert.equal(reader.scrollToRange(target), false);
+    assert.equal(body.scrollTop, 6_400);
+});
+
 test('paginated Sasayaki media stop plan lists every image page before target cue', () => {
     const body = new TestElement('body');
     body.scrollHeight = 4_000;

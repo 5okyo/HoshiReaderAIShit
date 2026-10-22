@@ -419,8 +419,9 @@ __HOSHI_READER_SASAYAKI_SCRIPT__
     var rect = this.getRect(range);
     var currentScroll = this.getPagePosition(context);
     var anchor = (context.vertical ? (rect.top + rect.bottom) / 2 : (rect.left + rect.right) / 2) + currentScroll;
-    var targetScroll = this.alignToPage(context, anchor);
-    if (targetScroll === currentScroll) return false;
+    var targetScroll = Math.min(this.alignToPage(context, anchor), context.maxScroll);
+    // WebView can round the assigned CSS offset to a fractional device-pixel position.
+    if (Math.abs(targetScroll - currentScroll) < 1) return false;
     this.setPagePosition(context, targetScroll);
     var self = this;
     requestAnimationFrame(function() {
