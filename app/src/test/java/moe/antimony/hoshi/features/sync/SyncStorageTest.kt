@@ -192,6 +192,58 @@ class SyncStorageTest {
         assertTrue(storage.state.books.getValue("book-a").sources.isEmpty())
     }
 
+    @Test fun localAudiobookEchoDoesNotRequestAReaderPlaybackChange() = runBlocking {
+        val root = local()
+        repository.saveSasayakiPlayback(root, SasayakiPlaybackData(12.4, audioFileName = "local.m4b"))
+        storage.prepareLibrary()
+        val snapshot = storage.loadBook("book-a")!!
+        val playbackChanges = mutableListOf<Boolean>()
+        storage.applyReaderState = { _, _, _, changed -> playbackChanges += changed }
+
+        // Playback may already have advanced by the time this saved local snapshot is merged.
+        storage.applyBook("book-a", snapshot)
+        storage.applyBook("book-a", snapshot.copy(sessions = mapOf(
+            "SESSION" to Timestamped(20, ReadingSession(10, 20, 10, 2.0)),
+        )))
+
+        assertEquals(listOf(false, false), playbackChanges)
+    }
+
+    @Test fun audiobookTimestampAndFloatRepresentationChangesDoNotRequestASeek() = runBlocking {
+        val root = local()
+        repository.applySasayakiPlayback(root, SasayakiPlaybackData(12.4, rate = 1.2f, modified = 100))
+        storage.prepareLibrary()
+        val snapshot = storage.loadBook("book-a")!!
+        val playbackChanges = mutableListOf<Boolean>()
+        storage.applyReaderState = { _, _, _, changed -> playbackChanges += changed }
+
+        storage.applyBook("book-a", snapshot.copy(audiobook = Timestamped(200, SyncPlayback(12.4, 0.0, 1.2))))
+
+        assertEquals(listOf(false), playbackChanges)
+        assertEquals(200L, repository.loadSasayakiPlayback(root)!!.modified)
+    }
+
+    @Test fun changedCloudAudiobookUpdatesTheReaderAndPreservesLocalAudioSelection() = runBlocking {
+        val root = local()
+        repository.saveSasayakiPlayback(root, SasayakiPlaybackData(12.4, audioUri = "content://audio", audioFileName = "local.m4b"))
+        storage.prepareLibrary()
+        val snapshot = storage.loadBook("book-a")!!
+        val playbackChanges = mutableListOf<Boolean>()
+        storage.applyReaderState = { _, _, _, changed -> playbackChanges += changed }
+
+        for (value in listOf(SyncPlayback(5.0, 0.0, 1.0), SyncPlayback(5.0, 2.0, 1.0), SyncPlayback(5.0, 2.0, 1.5))) {
+            storage.applyBook("book-a", snapshot.copy(audiobook = Timestamped(200, value)))
+        }
+
+        assertEquals(listOf(true, true, true), playbackChanges)
+        val applied = repository.loadSasayakiPlayback(root)!!
+        assertEquals(5.0, applied.lastPosition, 0.0)
+        assertEquals(2.0, applied.delay, 0.0)
+        assertEquals(1.5f, applied.rate)
+        assertEquals("content://audio", applied.audioUri)
+        assertEquals("local.m4b", applied.audioFileName)
+    }
+
     @Test fun localShelvesAndSessionEditsMarkPending() = runBlocking {
         val root = local()
         storage.prepareLibrary()

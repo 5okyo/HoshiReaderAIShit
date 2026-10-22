@@ -1656,7 +1656,7 @@ fun ReaderWebView(
             onClose()
         }
     }
-    val currentSyncApply = rememberUpdatedState<suspend (String, SyncBook, Boolean) -> Unit> { key, syncedBook, bookmarkChanged ->
+    val currentSyncApply = rememberUpdatedState<suspend (String, SyncBook, Boolean, Boolean) -> Unit> { key, syncedBook, bookmarkChanged, audiobookChanged ->
         if (bookRoot?.name?.syncKey() == key && !bookDeleted) withContext(Dispatchers.Main.immediate) {
             if (bookmarkChanged) {
                 book.bookInfo.resolveTtuCharacterPosition(syncedBook.bookmark!!.value.characterCount)?.let { position ->
@@ -1666,11 +1666,8 @@ fun ReaderWebView(
                 }
             }
             highlights = bookRepository.loadHighlights(bookRoot)
-            syncedBook.audiobook?.let { change ->
-                val playback = sasayakiPlayer?.playback
-                if (playback != null && (playback.lastPosition != change.value.lastPosition || playback.delay != change.value.delay || playback.rate.toDouble() != change.value.rate)) {
-                    sasayakiPlayer?.applySyncedPlayback(bookRepository.loadSasayakiPlayback(bookRoot)!!)
-                }
+            if (audiobookChanged) {
+                bookRepository.loadSasayakiPlayback(bookRoot)?.let { sasayakiPlayer?.applySyncedPlayback(it) }
             }
             statisticsTracker?.applySessions(syncedBook.sessions)
             syncStatisticsState()
@@ -1687,7 +1684,9 @@ fun ReaderWebView(
         val sync = appContainer.googleDriveSyncManager
         sync.flushReader = { currentSyncFlush.value(it) }
         sync.stopReader = { currentSyncStop.value(it) }
-        sync.store.applyReaderState = { key, book, changed -> currentSyncApply.value(key, book, changed) }
+        sync.store.applyReaderState = { key, book, bookmarkChanged, audiobookChanged ->
+            currentSyncApply.value(key, book, bookmarkChanged, audiobookChanged)
+        }
         sync.reloadSyncedMatch = { currentSyncMatch.value(it) }
         onDispose {
             sync.flushReader = null

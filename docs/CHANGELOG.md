@@ -7,7 +7,7 @@ Release notes before v1.3.0 are in [CHANGELOG_ARCHIVE.md](CHANGELOG_ARCHIVE.md).
 
 ### Added
 
-- Sync books, reading progress, highlights, shelves, statistics and audiobook playback with Hoshi on iOS through Google Drive, including devices without Google Play Services, with less startup delay for large bookshelves.
+- Sync books, reading progress, highlights, shelves, statistics and audiobook playback with Hoshi on iOS through Google Drive, including devices without Google Play Services, with less startup delay for large bookshelves and without replaying part of the current audiobook cue when local progress is synced.
 - Download cloud books on demand, choose local-only or cloud-wide deletion, resume interrupted uploads across app restarts, keep healthy uploads running while metadata requests recover from network timeouts, stop transfers when Google Drive requires reconnection, and track per-book progress, separate effective upload/download speeds and errors on a dedicated queue page that preserves your position, avoids a dim backdrop on E-ink screens, and shows checking status until transfers are known; upload chunks adapt to the connection, and transfer concurrency is configurable in Sync settings (default 8).
 - Read Japanese books aloud with device, online or self-hosted TTS voices, background playback, adjustable speed and separate narration/dialogue voices.
 - Customize TTS pronunciation with book-specific or global replacements, optional regular expressions and ruby readings, without changing book text.
