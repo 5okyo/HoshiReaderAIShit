@@ -919,6 +919,9 @@
     <string name="sync_queue">队列</string>
     <string name="sync_queue_empty">空</string>
     <string name="sync_queue_all_synced">所有书籍已同步</string>
+    <string name="sync_queue_checking">正在检查书籍状态，传输队列准备好后会显示。</string>
+    <string name="sync_queue_interrupted">同步已中断，传输队列尚未准备好。</string>
+    <string name="sync_queue_not_checked">尚未检查书籍状态。</string>
     <plurals name="sync_queue_failed">
         <item quantity="one">%1$d 本失败</item>
         <item quantity="other">%1$d 本失败</item>
@@ -1207,4 +1210,15 @@
     <string name="credit_kanji_stroke_order" translatable="false">Kanji Stroke Order Font</string>
     <string name="license_cc_by_sa4" translatable="false">CC-BY-SA-4.0</string>
     <string name="about_related_projects">友情链接</string>
+    <string name="sync_transfer_concurrency" comment="Drive file transfer queue">同时传输的书籍数</string>
+    <string name="sync_upload_speed" comment="Drive file transfer queue">上传：%1$s</string>
+    <string name="sync_download_speed" comment="Drive file transfer queue">下载：%1$s</string>
+    <string name="sync_transfer_preparing" comment="Drive file transfer queue">准备中</string>
+    <string name="sync_transfer_uploading" comment="Drive file transfer queue">上传中</string>
+    <string name="sync_transfer_downloading" comment="Drive file transfer queue">下载中</string>
+    <string name="sync_transfer_confirming" comment="Drive file transfer queue">等待确认</string>
+    <string name="sync_transfer_retrying" comment="Drive file transfer queue">正在重试</string>
+    <string name="sync_transfer_stage" comment="Drive file transfer queue">%1$s · %2$s</string>
+    <string name="sync_transfer_amount" comment="Drive file transfer queue">%1$s / %2$s</string>
+    <string name="sync_transfer_percent" comment="Drive file transfer queue">%1$d%% · %2$s</string>
 </resources>

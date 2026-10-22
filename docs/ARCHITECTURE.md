@@ -33,7 +33,7 @@ Names without an extension are searchable types, not necessarily filenames.
 | Dictionary UI, updates | `features/dictionary/`, `DictionaryMutationCoordinator` | Retained search session, profile configuration and serialized mutations |
 | Word audio | `features/audio/LocalAudioRepository.kt`, `features/audio/RemoteWordAudioRepository.kt`, `AudioRequestHandler` | Ordered audio candidates shared by popup playback and Anki |
 | Anki cards and media | `features/anki/AnkiRepository.kt`, `features/anki/AnkiBackend.kt` | Backend selection, formats, duplicate checks and export |
-| Hoshi/TTU Drive sync | `features/sync/GoogleDriveSyncManager.kt`, `features/sync/GoogleDriveSyncHandler.kt`, `features/sync/TtuSyncManager.kt`, `SyncStorage` | Provider protocols, state merge and background synchronization |
+| Hoshi/TTU Drive sync | `features/sync/GoogleDriveSyncManager.kt`, `features/sync/GoogleDriveSyncHandler.kt`, `features/sync/GoogleDriveFileTransfer.kt`, `features/sync/TtuSyncManager.kt`, `SyncStorage` | Provider protocols, state merge and background synchronization |
 | Backup, cleanup, cover publishing | `features/backup/`, `features/storage/`, `features/wallpaper/` | Repository-owned archive/cleanup operations and platform output targets |
 | Audiobook playback | `features/sasayaki/SasayakiPlaybackService.kt`, `SasayakiPlaybackController` | Service-owned Media3 player/session and reader cue callbacks |
 | Transcription, subtitle matching | `features/sasayaki/SasayakiTranscriptionCoordinator.kt`, `features/sasayaki/SasayakiTranscriptionRepository.kt`, `features/sasayaki/transcription/` | Checkpointed recognition, alignment and verified native resources |
@@ -61,6 +61,9 @@ Names without an extension are searchable types, not necessarily filenames.
   but inactive at CREATED lifecycle.
   Each stack uses `rememberSaveableStateHolderNavEntryDecorator()` and
   `rememberViewModelStoreNavEntryDecorator()` with typed route keys.
+- Sync settings and its transfer queue are separate Settings-stack routes.
+  The queue observes application-owned transfer state and uses the regular page
+  scaffold; leaving it does not stop synchronization.
 - Persisted controls require a confirmed `SettingsLoadState.Loaded`; pages use
   `SettingsDetailScaffold`, embedded controls use `SettingsContent`. Profile
   switches reset readiness and reject late results from the previous profile.
@@ -138,6 +141,10 @@ Validation guidance and failure injection methods are in
 - `BookStorageLock` serializes atomic sidecar/statistics transactions.
   `BookWorkRegistry` joins active book work before deletion or generation
   replacement, before acquiring that lock.
+- Bookshelf loading reuses the migrated `BookEntry` snapshot for shelf membership
+  instead of rereading every book's metadata. `SyncStorage.prepareLibrary` prepares
+  only missing live bookkeeping and checks empty archives; live-book sessions are loaded/migrated
+  when needed by sync/statistics, not eagerly under the startup storage lock.
 - `BookStatisticsStore` is the shared owner for reader sessions, edits, sync and
   archive/restore. UUID-keyed nullable records retain deletions; daily totals
   derive from sessions and reset time. `Books/statistics_archive/` participates
@@ -235,6 +242,9 @@ dynamic configuration and bridge calls.
 | Anki | All mining/media/duplicates go through `AnkiRepository` and its backend. Stable format IDs cross popup bridges. `{sasayaki-audio}` is audiobook-only; `{sentence-audio}` uses an associated audiobook cue or, without an audiobook, enabled TTS. A missing audiobook cue must not silently fall back to TTS. |
 | Sync | Hoshi and TTU retain distinct provider protocols behind the shared transport/settings. `SyncStorage` applies atomic sidecar merges; Android-only profile/language/audio URI fields stay local. |
 | Hoshi Drive state | State documents reference immutable generation files. Deletion wins within a generation; session deletions survive generations. Unknown versions block cursor advancement. Background work completes only after uploaded references are published. |
+| Hoshi metadata failures | `GoogleDriveClient` retries replay-safe Hoshi metadata requests after I/O failures with at most four exponential backoffs (1/2/4/8 seconds plus jitter), releasing the HTTP slot before waiting. Ambiguous POST creates are reconciled by the next sync pass, never blindly replayed. Exhausted metadata network failures stay on the affected book/pass and preserve pending state/cursors without cancelling healthy payloads; authentication failures stop the transfer run, as do explicit stop/reset and format failures. TTU and payload retry policies are separate. |
+| Hoshi file transport | `GoogleDriveFileTransfer` owns cancellable OkHttp payload I/O and resumable uploads; metadata and TTU stay on `GoogleDriveClient`. `DriveUploadSessions` atomically persists local-only session capabilities in `noBackupFilesDir`, never diagnostics or backups. Resume queries the server offset; completed responses survive until local file references are saved. Payload requests start at 4 MiB and adapt from confirmed bytes / full request duration toward 30 seconds, aligned to 256 KiB within 256 KiB–8 MiB; network failures reduce the next chunk. Source versions, connection resets and removed books invalidate sessions. |
+| Hoshi transfer queue | `BookTransferScheduler` shares the configured 1–8 book slots across uploads, queued downloads and priority reader downloads; the default is 8 and saved choices take precedence. Reductions drain existing work. `SyncTransferTracker` accepts identity-checked byte callbacks, uses a monotonic clock, and the manager publishes every 500 ms only while active. UI progress and effective speed are per file: useful progress since this attempt’s starting offset / elapsed payload time, including confirmation and retry waits, excluding preparation and duplicate retransmitted bytes. In-flight progress is provisional and can roll back on recovery; 60 seconds without payload or acknowledgement progress yields zero. Upload/download totals sum active file rates. The file queue is built after the state pass; an empty queue only claims completion after a successful state check, and otherwise shows checking, interrupted or not-yet-checked status. |
 | Authentication | Hoshi uses native Google authorization or browser PKCE; TTU keeps device-code auth. Browser tokens stay under `noBackupFilesDir`; credentials and token bodies must not enter diagnostics. Build configuration is in VALIDATION. |
 | Reader sync | Flush pending local saves before reconciliation; suppress write-back during remote restore. Remote deletion/replacement closes the reader after statistics/audio cleanup. |
 | Backup restore | `BackupSettingsView` coordinates `HoshiBackupRepository` with sync: stop sync before Books replacement, reset bookkeeping on success, disable sync on failure before restarting the manager. |

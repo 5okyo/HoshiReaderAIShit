@@ -94,7 +94,28 @@ adb -s "$hoshi_serial" shell am instrument -w -r \
 Report tested API/WebView versions, commands, results, artifact paths and any
 unexecuted checks in the current task.
 
+## Drive metadata timeout isolation
+
+Run `python3 tools/drive-metadata-isolation-fixture.py` on the host and
+`adb -s "$hoshi_serial" reverse tcp:18766 tcp:18766`, then explicitly run
+`moe.antimony.hoshi.features.sync.DriveMetadataIsolationDeviceTest` with
+`-e driveIsolationUrl http://127.0.0.1:18766`. Build/install debug and test APKs
+using the data-preserving procedure above. Restart the fixture server for each run.
+The opt-in test owns scratch stores/settings and generated files (one 60 MiB,
+seven 24 MiB); no production credentials or library files are used. It waits for
+all eight server sessions to receive payload bytes before arming a real 60-second
+metadata read timeout, then drops subsequent metadata responses to exhaust retries.
+Assertions require all eight payloads to advance and remain active after failure,
+then finish and publish references after recovery. Expect roughly two minutes.
+Stop the fixture and remove only this reverse mapping after testing.
+
 ## WebView and UI automation pitfalls
+
+- Material 3 `ModalBottomSheet` applies its caller modifier before the internal
+  sheet offset; an outer `border` can remain on the scrim at the unshifted height.
+  Check short and shrinking E-ink sheets, not only full-height lists.
+  `SyncQueueViewTest` captures the real dialog window and checks for stray lines
+  above the sheet while its queue shrinks.
 
 - Cold launch normally lands on Bookshelf; open a book before testing Reader.
   Single-tap text opens lookup; long press tests native selection/highlights.
@@ -153,6 +174,7 @@ profile; identify app-owned callers and self/inclusive time.
 | Worse after repeated entry | Live WebView targets, process CPU, heap retention and pending callbacks before/after each cycle |
 | Reader JS scales badly | Look for nested block×text/cue×screen scans and layout reads after DOM writes; protect improvements with operation-count tests |
 | Bookshelf cover jank | Separate original `HoshiCoverPipeline: source_decode` from cached thumbnail decode; a second unchanged warm round trip should not decode originals |
+| Blank bookshelf at startup | Compare the same signed release and library over repeated force-stop launches; use recording frame timestamps for shelf chrome → first books → covers. `am start -W` measures Activity display, not bookshelf data readiness. Measure repository stages and concurrent sync preparation separately on an isolated sidecar copy; do not compare debug/JIT timings directly with release latency. |
 | Statistics scrolling | Keep period/book expansion/heatmap/font state fixed; distinguish viewport drawing from repeated offscreen card recomposition |
 | Transcription slowness | Same compressed input and resume position; measure decoding, model load, inference and saving/alignment, plus thermal state, RSS/PSS and CPU/wall time |
 
@@ -178,6 +200,47 @@ secret is used. Release CI requires its release ID; ordinary unit/lint CI does
 not. Auth changes must check generated BuildConfig and merged redirect schemes,
 including empty environment values. Protocol and activity tests live under
 `features/sync` in the JVM/device test trees.
+
+### Drive payload transfer fixtures
+
+`DriveFileTransferTest` covers resumable protocol recovery and persistence with
+MockWebServer. `BookTransferSchedulerTest` and `SyncTransferTrackerTest` cover
+concurrency and monotonic-clock effective speed measurement without real network timing.
+`SyncQueueViewTest` renders isolated upload/download rows and checks that active
+row reordering/completion preserves the queue head or the user's manually scrolled
+position without accessing the book repository or account; its screenshot is in target cache
+`sync-queue-fixture.png`.
+
+For device restart recovery, build/install the debug and androidTest APKs under
+the signature/data-protection rules above. Start
+`python3 tools/drive-transfer-fixture.py`, then use
+`adb -s "$hoshi_serial" reverse tcp:18765 tcp:18765`. Run these methods separately
+with `am instrument -w -r -e class <class>#<method> -e driveFixtureUrl
+http://127.0.0.1:18765 moe.antimony.hoshi.debug.test/androidx.test.runner.AndroidJUnitRunner`:
+
+1. `moe.antimony.hoshi.features.sync.DriveTransferDeviceTest#prepareInterruptedUpload`
+   waits for a confirmed chunk and a deliberately dropped subsequent connection.
+2. Call `curl -X POST http://127.0.0.1:18765/allow-resume`, then run
+   `DriveTransferDeviceTest#resumeAfterProcessRestartAndDownload` with the same
+   full class package. It checks a different PID, resumes the saved session,
+   compares downloaded SHA-256, and removes only its generated cache fixture.
+
+The loopback server throttles payload reads/writes and exposes `/stats` to verify
+that the new process queried the saved session and resumed at the acknowledged
+byte instead of creating another upload. Require `OK (1 test)` for each method;
+Android instrumentation's final code alone does not distinguish assertion
+failures. Remove the task-owned reverse with
+`adb -s "$hoshi_serial" reverse --remove tcp:18765` and stop the server afterward.
+For a controlled before/after comparison, start the fixture with
+`--benchmark --response-delay 4` and run
+`DriveTransferDeviceTest#measureUploadThroughputAndConfirmationSpeed` on the old
+and new debug APKs with the same test APK and loopback argument. The method
+reports elapsed seconds and zero-speed samples while awaiting acknowledgement;
+`-e expectEffectiveSpeed true` asserts no such zero samples for the new build.
+It uploads the same generated 12 MiB file each time; `/stats` reports payload
+request counts and ranges. Compare total duration, not the UI's estimated speed.
+
+These tests do not establish real Google account throughput or proxy behavior.
 
 ### Transcription components and benchmarks
 

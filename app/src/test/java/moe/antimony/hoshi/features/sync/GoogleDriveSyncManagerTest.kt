@@ -163,6 +163,7 @@ class GoogleDriveSyncManagerTest {
 
     private suspend fun TestScope.fixture(
         dispatcher: TestDispatcher = UnconfinedTestDispatcher(testScheduler),
+        transferFactory: (GoogleDriveClient) -> DriveFileTransfer = { TestDriveFileTransfer(it) },
         beforeRequest: suspend () -> Unit = {},
     ): Fixture {
         val remote = DriveService()
@@ -179,7 +180,7 @@ class GoogleDriveSyncManagerTest {
         val client = GoogleDriveClient(token, { settings.settings.first().provider }, {}, dispatcher, remote::connection)
         val handler = GoogleDriveSyncHandler(client)
         val manager = GoogleDriveSyncManager(store, handler, client, settings, books, temporary.root,
-            temporary.root.resolve("cache").apply { mkdirs() }, CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])), dispatcher, dispatcher, { true }, {}, {})
+            temporary.root.resolve("cache").apply { mkdirs() }, CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])), dispatcher, dispatcher, { true }, {}, {}, transferFactory(client))
         return Fixture(remote, books, store, manager, settings, client)
     }
 
@@ -316,7 +317,7 @@ class GoogleDriveSyncManagerTest {
         val settings = SyncSettingsRepository(MemoryPreferences(), NoTtu, dispatcher)
         settings.update { it.copy(enabled = true) }
         val client = GoogleDriveClient(object : DriveAccessTokenProvider { override suspend fun accessToken() = "token" }, { SyncProvider.Gdrive }, {}, dispatcher, f.remote::connection)
-        val restarted = GoogleDriveSyncManager(f.store, GoogleDriveSyncHandler(client), client, settings, f.books, temporary.root, temporary.root.resolve("cache"), CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])), dispatcher, dispatcher, { true }, {}, {})
+        val restarted = GoogleDriveSyncManager(f.store, GoogleDriveSyncHandler(client), client, settings, f.books, temporary.root, temporary.root.resolve("cache"), CoroutineScope(backgroundScope.coroutineContext + SupervisorJob(backgroundScope.coroutineContext[Job])), dispatcher, dispatcher, { true }, {}, {}, TestDriveFileTransfer(client))
         restarted.sync(metadata)
         assertEquals(3, f.remote.reads["a"])
         assertEquals(1, f.remote.queries.count { "book-a.json" in it })
@@ -393,6 +394,74 @@ class GoogleDriveSyncManagerTest {
         f.manager.sync()
         assertEquals(2, f.remote.reads["a"])
         assertEquals("Other device", f.store.loadBook("book-a")!!.metadata.value.title)
+    }
+
+    @Test fun exposesEveryActiveBookAndHonorsLiveConcurrencyChanges() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(transferFactory = { client -> object : TestDriveFileTransfer(client) {
+            override suspend fun upload(file: java.io.File, request: DriveUploadRequest, progress: (DriveTransferUpdate) -> Unit): GoogleDriveFile {
+                progress(DriveTransferUpdate(2, file.length(), deltaBytes = 2))
+                gate.await()
+                return super.upload(file, request, progress)
+            }
+        } })
+        f.settings.update { it.copy(transferConcurrency = 2) }
+        repeat(3) { index ->
+            val name = "book-$index"
+            val root = f.books.createBookDirectory(name)
+            f.books.saveMetadata(root, BookMetadata(name, name, folder = name, epub = "$name.epub", lastAccess = 0.0))
+            root.resolve("$name.epub").writeText("sample-epub")
+            f.store.handleBookImport(f.books.loadMetadata(root)!!, root)
+        }
+        f.manager.sync()
+        advanceTimeBy(501)
+        runCurrent()
+        assertEquals(2, f.manager.state.value.activeTransfers.size)
+        assertTrue(f.manager.state.value.activeTransfers.values.all { it.bytes == 2L })
+        f.settings.update { it.copy(transferConcurrency = 3) }
+        runCurrent()
+        assertEquals(3, f.manager.state.value.activeTransfers.size)
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(f.manager.state.value.activeTransfers.isEmpty())
+        assertTrue(f.manager.state.value.queue.isEmpty())
+    }
+
+    @Test fun exhaustedMetadataTimeoutDoesNotCancelEightHealthyUploads() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val f = fixture(transferFactory = { client -> object : TestDriveFileTransfer(client) {
+            override suspend fun upload(file: java.io.File, request: DriveUploadRequest, progress: (DriveTransferUpdate) -> Unit): GoogleDriveFile {
+                progress(DriveTransferUpdate(2, file.length(), deltaBytes = 2))
+                gate.await()
+                return super.upload(file, request, progress)
+            }
+        } })
+        f.settings.update { it.copy(transferConcurrency = 8) }
+        repeat(8) { index ->
+            val name = "book-$index"
+            val root = f.books.createBookDirectory(name)
+            f.books.saveMetadata(root, BookMetadata(name, name, folder = name, epub = "$name.epub", lastAccess = 0.0))
+            root.resolve("$name.epub").writeText("sample-epub")
+            f.store.handleBookImport(f.books.loadMetadata(root)!!, root)
+        }
+        f.manager.sync()
+        advanceTimeBy(501)
+        runCurrent()
+        assertEquals(8, f.manager.state.value.activeTransfers.size)
+        val cursor = f.manager.cache.cursor
+        f.remote.failRequest = { java.net.SocketTimeoutException("metadata timeout") }
+        f.manager.sync()
+        runCurrent()
+        assertNotNull(f.manager.state.value.errorMessage)
+        assertEquals(cursor, f.manager.cache.cursor)
+        assertEquals("Metadata failure must not cancel payloads", 8, f.manager.state.value.activeTransfers.size)
+        f.remote.failRequest = null
+        gate.complete(Unit)
+        runCurrent()
+        assertTrue(f.manager.state.value.activeTransfers.isEmpty())
+        assertNull(f.manager.state.value.errorMessage)
+        assertTrue(f.manager.state.value.queue.isEmpty())
+        assertEquals(8, f.store.state.books.values.count { !it.pending && it.files[SyncFileType.epub]?.value != null })
     }
 
     @Test fun publishesFilesOnlyAfterUploadAndDownloadsEpubOnlyOnDemand() = runTest {
@@ -605,11 +674,31 @@ class GoogleDriveSyncManagerTest {
         assertTrue(f.manager.state.value.queue.isEmpty())
     }
 
+    @Test fun metadataTimeoutIsIsolatedToBookAndKeepsCursorForRetry() = runTest {
+        val f = fixture()
+        f.remote.addState("a", "book-a.json", SyncFormat.encode(remoteBook))
+        f.remote.addState("b", "book-b.json", SyncFormat.encode(remoteBook))
+        val failure = java.net.SocketTimeoutException("state timeout")
+        f.remote.failRead = { if (it == "a") failure else null }
+        f.manager.sync()
+        runCurrent()
+        assertNull(f.manager.state.value.errorMessage)
+        assertEquals("Remote", f.store.loadBook("book-b")!!.metadata.value.title)
+        assertNull(f.manager.cache.cursor)
+        assertTrue(f.manager.state.value.queue.single().error.details().contains("state timeout"))
+        assertSame(failure, ErrorDiagnosticEvents.buffer.drain().single().error!!.cause)
+        f.remote.failRead = { null }
+        f.manager.sync()
+        runCurrent()
+        assertEquals("next", f.manager.cache.cursor)
+        assertTrue(f.manager.state.value.queue.isEmpty())
+    }
+
     @Test fun unavailableDriveStopsRun() = runTest {
         val f = fixture()
         f.remote.addState("a", "book-a.json", SyncFormat.encode(remoteBook))
         f.remote.addState("b", "book-b.json", SyncFormat.encode(remoteBook))
-        f.remote.failRead = { if (it == "a") IOException("offline") else null }
+        f.remote.failRead = { if (it == "a") GoogleDriveUnavailableException(IOException("offline")) else null }
         f.manager.sync()
         runCurrent()
         assertNotNull(f.manager.state.value.errorMessage)
@@ -617,6 +706,33 @@ class GoogleDriveSyncManagerTest {
         assertEquals(0, f.remote.reads["b"] ?: 0)
         assertTrue(f.manager.state.value.queue.isEmpty())
         assertNull(f.manager.cache.cursor)
+    }
+
+    @Test fun rejectedTransferAuthorizationStopsTheWholeRun() = runTest {
+        val rejection = DriveAuthorizationRequiredException()
+        var uploads = 0
+        val f = fixture(transferFactory = { client -> object : TestDriveFileTransfer(client) {
+            override suspend fun upload(file: java.io.File, request: DriveUploadRequest, progress: (DriveTransferUpdate) -> Unit): GoogleDriveFile {
+                uploads++
+                throw rejection
+            }
+        } })
+        f.settings.update { it.copy(transferConcurrency = 1) }
+        repeat(2) { index ->
+            val name = "book-$index"
+            val root = f.books.createBookDirectory(name)
+            f.books.saveMetadata(root, BookMetadata(name, name, folder = name, epub = "$name.epub", lastAccess = 0.0))
+            root.resolve("$name.epub").writeText("sample-epub")
+            f.store.handleBookImport(f.books.loadMetadata(root)!!, root)
+        }
+
+        f.manager.sync()
+        runCurrent()
+
+        assertEquals(1, uploads)
+        assertTrue(f.manager.state.value.errorMessage.details().contains("Connect Google Drive"))
+        assertTrue(f.manager.state.value.queue.none { it.error != null })
+        assertTrue(f.store.state.books.values.all { it.files[SyncFileType.epub] == null })
     }
 
     @Test fun backgroundSyncReportsOfflineFailureAndRecoversOnNextAttempt() = runTest {

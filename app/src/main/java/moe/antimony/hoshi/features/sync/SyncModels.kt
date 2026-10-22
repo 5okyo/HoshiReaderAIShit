@@ -39,7 +39,12 @@ data class SyncSettings(
     val autoSyncEnabled: Boolean = false,
     val authProvider: SyncAuthProvider = SyncAuthProvider.DeviceCode,
     val uploadBooks: Boolean = true,
-)
+    val transferConcurrency: Int = DefaultTransferConcurrency,
+) {
+    companion object {
+        const val DefaultTransferConcurrency = 8
+    }
+}
 
 sealed interface DriveAuthStatus {
     data object Connected : DriveAuthStatus
@@ -126,7 +131,10 @@ class GoogleDriveApiException(
     }
 }
 
-class GoogleDriveUnavailableException(override val cause: Throwable) : Exception(cause.message, cause)
+open class GoogleDriveUnavailableException(override val cause: Throwable) : Exception(cause.message, cause)
+
+/** A Hoshi metadata HTTP exchange failed; it does not invalidate unrelated payload transfers. */
+internal class GoogleDriveMetadataNetworkException(cause: java.io.IOException) : GoogleDriveUnavailableException(cause)
 
 internal fun shouldAttemptDriveRequest(
     hasActiveNetwork: Boolean,
